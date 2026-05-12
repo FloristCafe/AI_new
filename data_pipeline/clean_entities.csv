@@ -1,0 +1,5 @@
+﻿entity,label,start_offset,end_offset
+张一鸣,PERSON,14,17
+大模型,PERSON,27,30
+百度,ORG,38,40
+李彦宏,PERSON,41,44
