@@ -1,0 +1,128 @@
+{
+  "dense_features": [
+    "integer_feature_1",
+    "integer_feature_2",
+    "integer_feature_3",
+    "integer_feature_4",
+    "integer_feature_5",
+    "integer_feature_6",
+    "integer_feature_7",
+    "integer_feature_8",
+    "integer_feature_9",
+    "integer_feature_10",
+    "integer_feature_11",
+    "integer_feature_12",
+    "integer_feature_13"
+  ],
+  "sparse_features": [
+    "categorical_feature_1",
+    "categorical_feature_2",
+    "categorical_feature_3",
+    "categorical_feature_4",
+    "categorical_feature_5",
+    "categorical_feature_6",
+    "categorical_feature_7",
+    "categorical_feature_8",
+    "categorical_feature_9",
+    "categorical_feature_10",
+    "categorical_feature_11",
+    "categorical_feature_12",
+    "categorical_feature_13",
+    "categorical_feature_14",
+    "categorical_feature_15",
+    "categorical_feature_16",
+    "categorical_feature_17",
+    "categorical_feature_18",
+    "categorical_feature_19",
+    "categorical_feature_20",
+    "categorical_feature_21",
+    "categorical_feature_22",
+    "categorical_feature_23",
+    "categorical_feature_24",
+    "categorical_feature_25",
+    "categorical_feature_26"
+  ],
+  "sparse_vocab_sizes": {
+    "categorical_feature_1": 22,
+    "categorical_feature_2": 59,
+    "categorical_feature_3": 53,
+    "categorical_feature_4": 34,
+    "categorical_feature_5": 41,
+    "categorical_feature_6": 3,
+    "categorical_feature_7": 60,
+    "categorical_feature_8": 51,
+    "categorical_feature_9": 11,
+    "categorical_feature_10": 25,
+    "categorical_feature_11": 25,
+    "categorical_feature_12": 29,
+    "categorical_feature_13": 10,
+    "categorical_feature_14": 11,
+    "categorical_feature_15": 57,
+    "categorical_feature_16": 12,
+    "categorical_feature_17": 5,
+    "categorical_feature_18": 16,
+    "categorical_feature_19": 12,
+    "categorical_feature_20": 22,
+    "categorical_feature_21": 25,
+    "categorical_feature_22": 24,
+    "categorical_feature_23": 16,
+    "categorical_feature_24": 61,
+    "categorical_feature_25": 12,
+    "categorical_feature_26": 14
+  },
+  "dense_normalization": {
+    "integer_feature_1": {
+      "mean": 32.136875,
+      "std": 329.3514910291683
+    },
+    "integer_feature_2": {
+      "mean": 416.923125,
+      "std": 749.7911201912723
+    },
+    "integer_feature_3": {
+      "mean": 4.54375,
+      "std": 8.235242737882405
+    },
+    "integer_feature_4": {
+      "mean": 137.921875,
+      "std": 2052.5246278337077
+    },
+    "integer_feature_5": {
+      "mean": 11.244375,
+      "std": 50.60510303954436
+    },
+    "integer_feature_6": {
+      "mean": 0.965625,
+      "std": 5.860538333024153
+    },
+    "integer_feature_7": {
+      "mean": 0.170625,
+      "std": 3.030016540304949
+    },
+    "integer_feature_8": {
+      "mean": 128.006875,
+      "std": 433.55869272828517
+    },
+    "integer_feature_9": {
+      "mean": 9.066875,
+      "std": 11.482968446228774
+    },
+    "integer_feature_10": {
+      "mean": 0.070625,
+      "std": 0.5719191739996945
+    },
+    "integer_feature_11": {
+      "mean": 1.720625,
+      "std": 5.080473069853676
+    },
+    "integer_feature_12": {
+      "mean": 20360.69625,
+      "std": 63296.927275870505
+    },
+    "integer_feature_13": {
+      "mean": 6.6675,
+      "std": 16.057065020908354
+    }
+  },
+  "label_col": "label"
+}

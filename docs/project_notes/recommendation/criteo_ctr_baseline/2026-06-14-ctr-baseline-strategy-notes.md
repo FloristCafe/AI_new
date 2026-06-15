@@ -1,189 +1,303 @@
-# Criteo CTR Baseline Strategy Notes
+# Criteo CTR Baseline 策略笔记
 
-## Why `docs/project_notes/recommendation/criteo_ctr_baseline/`
+## 笔记存放规则
 
-This project note lives under:
+这份笔记固定放在：
 
-- `docs/project_notes/`: project-facing notes, not code and not roadmap
-- `recommendation/`: track-level grouping
-- `criteo_ctr_baseline/`: one folder per concrete project
+- `docs/project_notes/`：项目级思考、实验判断、策略复盘
+- `recommendation/`：推荐系统方向
+- `criteo_ctr_baseline/`：当前具体项目
 
-Rule to keep using later:
+后续继续沿用这个规则：
 
-- roadmap and workspace rules stay in `docs/roadmaps/`
-- project-specific reasoning, experiment notes, and strategy reviews stay in `docs/project_notes/<track>/<project>/`
-- do not scatter notes into `src/`, `artifacts/`, or the workspace root
+- `docs/roadmaps/` 放路线图、仓库规则、总体规划
+- `docs/project_notes/<track>/<project>/` 放项目内的策略判断、实验记录、问题复盘
+- 不把这类思考散落到 `src/`、`artifacts/` 或仓库根目录
 
-This keeps "what we built" separate from "why we chose it".
+这样可以把“代码与结果”跟“为什么这样做”分开管理。
 
-## Strategy Decision 1: Dense Missing Value Sentinel
+## 当前阶段的核心定位
 
-Current decision:
+当前这个项目还处在 baseline 学习阶段。
 
-- dense feature missing values are filled with `-1`
+重点不是一上来就堆更强的非线性模型，而是先把以下几个基础问题真正建立起来：
 
-Reasoning:
+- 缺失值怎么处理
+- 稀有类别怎么折叠
+- 类别特征怎么编码
+- 样本切分是否规范
+- 指标该怎么看
 
-- In this CTR dataset, dense features are closer to count-like or non-negative behavior than to symmetric real-valued measurements.
-- A real `0` can mean "observed but zero".
-- A missing value often means "this field was unavailable or absent".
-- Filling with `0` mixes these two meanings together.
-- Filling with `-1` creates a simple first-pass missing sentinel that a linear model can distinguish.
+也就是说，我们当前想先研究“特征和数据流程”，不是先堆非线性。
 
-What this decision does well:
+原因很简单：
 
-- preserves the difference between "zero" and "missing"
-- is easy to implement in a baseline
-- is usually more faithful than `0` for non-negative dense fields
+- 如果一开始就上更强模型，模型能力会把很多基础问题遮住
+- 这样即使结果变好，也不容易判断到底是数据流程更合理了，还是模型只是更会拟合了
+- 学习阶段最重要的是先知道问题出在哪里，而不是先把分数抬上去
 
-What it does not solve:
+## 策略决定 1：Dense 特征缺失值先用 `-1`
 
-- `-1` is still a heuristic, not a learned representation
-- the model may still treat missingness too crudely
-- a stronger later version should consider adding explicit missing-indicator columns
+当前决定：
 
-Practical conclusion:
+- dense 特征缺失值使用 `-1` 填补
 
-- For the current baseline, `-1` is a reasonable improvement over `0`
-- For later versions, "dense value + missing flag" is likely better
+原因：
 
-## Strategy Decision 2: Why One-Hot Can Be Biased in Ad Click Modeling
+- 在 CTR 这类数据里，dense 特征更接近计数型、频次型、非负数值特征
+- 一个真实的 `0` 往往可能表示“确实观测到了零”
+- 而缺失值表示的是“这个字段没有提供”或“这个字段不可用”
+- 如果统一填成 `0`，就会把“真实为零”和“缺失”混在一起
 
-Important point:
+所以对于当前 baseline：
 
-- One-hot is not only "high dimensional"
-- In ad click prediction, it can be systematically biased by serving logic and human behavior
+- `0` 更像真实值
+- `-1` 更像缺失哨兵值
 
-### 1. One-hot treats IDs as isolated facts
+这样做的好处：
 
-Ad CTR data contains many categorical IDs:
+- 能更明确地区分“缺失”和“真实零值”
+- 对线性模型来说，这是一个简单但有实际意义的信号
+- 比起直接填 `0`，更符合当前这类 dense 特征的语义
 
-- user-related buckets
-- ad / campaign / creative IDs
-- publisher / page / slot IDs
-- device / context IDs
+但也要注意：
 
-One-hot gives each category its own separate coordinate.
+- `-1` 仍然只是工程上的第一版启发式做法
+- 它不是最终最优表达
+- 更强的后续版本应该考虑“数值本体 + 缺失指示列”一起建模
 
-Problem:
+当前结论：
 
-- it does not express similarity between categories
-- two creatives that are semantically close are treated as unrelated
-- two placements with similar audience intent are treated as unrelated
+- 对这个 baseline 来说，`-1` 比 `0` 更合理
+- 但它只是第一步，不是最终答案
 
-Result:
+## 策略决定 2：为什么 one-hot 在广告点击场景里容易产生偏差
 
-- the model memorizes sparse coincidences instead of learning reusable structure
+这里的问题不只是“维度变高”，而是 one-hot 在广告点击预测里会引入比较明显的结构性偏差。
 
-### 2. Clicks are affected by exposure policy, not only user preference
+### 1. one-hot 把类别 ID 当成彼此孤立的事实
 
-An ad click is not a pure preference label.
-It is the result of a serving pipeline:
+广告点击数据里有很多高基数类别：
 
-- auction and bidding decisions
-- targeting rules
-- placement constraints
-- time and page context
+- 广告 ID
+- campaign ID
+- creative ID
+- publisher / placement / slot ID
+- device / context ID
 
-This means a category may look "good" because it was shown under better conditions, not because it is intrinsically better.
+one-hot 的处理方式是：
 
-One-hot tends to absorb these accidental correlations very directly.
+- 每个类别单独占一个维度
+- 类别和类别之间没有相似性概念
 
-Example:
+这会导致：
 
-- a certain campaign ID may get high CTR because it was mostly exposed to high-intent users
-- one-hot may then learn "this ID is good"
-- but what actually mattered was targeting and exposure condition, not the ID alone
+- 两个语义很接近的广告素材，被当成完全无关
+- 两个用户意图相似的上下文位置，被当成完全无关
+- 模型更容易记住局部稀疏巧合，而不是学习可迁移的结构
 
-### 3. Human behavior creates unstable correlations
+### 2. 点击不是纯粹的“用户偏好标签”
 
-Ad clicks are influenced by many human factors:
+广告点击并不是一个干净的自然标签。
+它背后还受到大量投放机制影响：
 
-- novelty effect
-- ad fatigue
-- accidental clicks
-- trust in brand or site
-- time pressure
-- repeated exposure changing response
+- 竞价机制
+- 定向规则
+- 展示位置
+- 页面上下文
+- 展示时机
 
-One-hot cannot represent these dynamics well.
-Instead, it freezes a category into a static indicator.
+所以某个广告 ID 点击率高，并不一定说明“这个 ID 本身就好”，也可能只是：
 
-Result:
+- 它被展示给了更高意图的人群
+- 它更多出现在更容易点击的位置
+- 它经历了更有利的投放条件
 
-- yesterday's useful ID pattern can become today's noise
-- repeated exposures may reduce click probability, but one-hot alone cannot express that evolving effect
+而 one-hot 很容易把这种“曝光条件造成的相关性”直接吸收到单个 ID 上。
 
-### 4. Sparse one-hot magnifies small-sample accidents
+这会形成偏差：
 
-With high-cardinality features and small sample size:
+- 模型会误以为“这个 ID 天生就强”
+- 但真实起作用的，可能是投放环境，不是 ID 本身
 
-- many categories appear only a few times
-- a few lucky or unlucky clicks can dominate their estimated weight
+### 3. 人的点击行为本身是动态的、不稳定的
 
-This is especially dangerous in ad data because:
+广告点击会受到很多人为因素影响：
 
-- positive labels are rare
-- exposure is selective, not random
-- many IDs are operational artifacts rather than stable semantic objects
+- 新鲜感效应
+- 广告疲劳
+- 误触
+- 品牌信任
+- 时间压力
+- 重复曝光后的厌倦或适应
 
-So one-hot can exaggerate random local history into apparently meaningful signals.
+one-hot 的问题是：
 
-### 5. Important interactions are missing
+- 它把类别冻结成一个静态标记
+- 它不擅长表达“同一个对象在不同阶段表现不同”
 
-CTR is often driven by interactions such as:
+所以：
 
-- user intent x ad creative
-- page context x device
-- slot position x campaign type
-- frequency of exposure x user response
+- 昨天有效的模式，今天可能已经衰减
+- 某类广告在首次曝光和第五次曝光时，点击逻辑可能完全不同
+- 但 one-hot 很难自然表示这种演化
 
-Plain one-hot plus linear model mostly learns additive effects.
-It misses many interaction patterns unless we engineer them manually.
+### 4. 在小样本和稀疏标签下，one-hot 容易放大偶然性
 
-That creates another source of distortion:
+当前项目的现实条件是：
 
-- the model may assign blame or credit to a single ID
-- but the real effect may only exist under a specific combination
+- 样本量还很小
+- 正样本很少
+- 类别空间很大
 
-## Project-Level Takeaway
+这时 one-hot 会有一个明显风险：
 
-For this project, one-hot with logistic regression is still useful as a baseline because it helps us:
+- 某些类别只出现几次
+- 几次偶然点击或偶然未点击，就会让模型对这个类别形成很强权重判断
 
-- verify the pipeline
-- establish a simple reference point
-- observe overfitting and calibration behavior
+在广告点击任务里，这尤其危险，因为：
 
-But it has clear structural weaknesses in ad click modeling:
+- 点击本来就是稀有事件
+- 曝光本来就不是随机的
+- 很多类别 ID 本身并不是稳定语义对象，而只是业务操作结果
 
-- memorization of sparse IDs
-- sensitivity to exposure bias
-- inability to represent semantic similarity
-- weak handling of evolving human response
-- weak interaction modeling
+所以 one-hot 容易把“局部历史噪声”误学成“有意义规律”。
 
-So this baseline should be treated as:
+### 5. 线性 one-hot 很难表示关键交互
 
-- a pipeline sanity check
-- a calibration and experiment starting point
-- not a strong final representation for recommendation or ad CTR modeling
+CTR 往往强依赖交互项，例如：
 
-## Likely Next Modeling Directions
+- 用户意图 × 广告素材
+- 页面上下文 × 设备类型
+- 广告位 × campaign 类型
+- 曝光频次 × 用户响应
 
-More suitable later directions include:
+而 one-hot 加线性模型主要学的是加性贡献。
+如果不手工构造交互，它很难自然表达这些关系。
 
-- adding explicit missing indicators for dense features
-- expanding sample size before over-interpreting small-micro results
-- factorization-based models such as FM / FFM
-- embedding-based models such as DeepFM
-- features that encode exposure count, recency, or interaction structure
+结果就是：
 
-## Current Code Decision
+- 模型会把复杂交互误归因到某一个单独 ID
+- 但真正的点击提升，只在某种组合条件下才成立
 
-Applied in code now:
+## 为什么当前没有优先采用随机森林
 
-- dense missing values use `-1` instead of `0`
+随机森林不是不能用，但它不是当前阶段最优先的第一选择。
 
-Not changed yet:
+### 1. 我们当前要先研究“特征和数据流程”，不是先堆非线性
 
-- the overall logistic regression plus one-hot baseline remains, because it is still useful as a controlled reference model
+当前最重要的不是模型能力，而是把数据处理逻辑打磨清楚。
+
+你现在真正要建立的是：
+
+- 缺失值怎么处理
+- 稀有类别怎么折叠
+- 类别特征怎么编码
+- 样本切分是否规范
+- 指标该怎么看
+
+如果一开始就上随机森林，模型能力变强了，反而会把这些基础问题盖住。
+
+### 2. 逻辑回归更“诚实”
+
+逻辑回归在这个阶段的价值，不只是简单，而是它更容易暴露问题。
+
+它会更快暴露：
+
+- 数据泄漏
+- 稀疏维度爆炸
+- 概率校准差
+- 不平衡问题
+
+这对学习阶段很有价值。
+
+因为现在我们想知道的是：
+
+- 流程是不是规范
+- 表征是不是合理
+- 指标为什么这样变化
+
+而不是先让更强模型把问题暂时掩盖过去。
+
+### 3. 当前问题的核心是过拟合，不是模型不够复杂
+
+当前微样本阶段的主要风险是：
+
+- 样本少
+- 正样本少
+- 高基数类别多
+- one-hot 后矩阵稀疏且容易记忆局部模式
+
+在这种情况下，随机森林很可能会进一步增强局部记忆能力，而不是解决问题。
+
+也就是说：
+
+- 现在的主要矛盾不是“模型表达力不够”
+- 而是“数据流程和样本条件下，模型太容易记住偶然性”
+
+### 4. CTR 的后续升级路线更自然不是 Random Forest，而是 FM / DeepFM
+
+在广告点击、推荐排序这条线上，更自然的升级通常是：
+
+- LR baseline
+- FM / FFM
+- Wide & Deep
+- DeepFM
+- DLRM / embedding-based ranking models
+
+原因是这些模型更适合：
+
+- 高基数类别特征
+- 稀疏离散 ID
+- 特征交互建模
+- 大规模 CTR 场景
+
+也就是说，这条路线和当前任务的数据结构更匹配。
+
+随机森林当然可以作为一个对照实验，但它不是这条主干路线里最自然的下一步。
+
+## 当前阶段的项目结论
+
+当前这版 logistic regression + one-hot baseline 的价值主要在于：
+
+- 验证整条数据管线是否跑通
+- 建立最基础的可比较基线
+- 帮助观察过拟合、校准、类别处理方式带来的影响
+
+它的缺点也很明确：
+
+- 容易记忆稀疏 ID
+- 容易受曝光偏差影响
+- 不擅长表达类别之间的相似性
+- 不擅长表达动态的人类点击行为
+- 不擅长自然建模高阶交互
+
+所以这版 baseline 应该被看作：
+
+- 一个流程检查器
+- 一个实验起点
+- 一个帮助暴露问题的“诚实模型”
+
+而不是最终的 CTR 表征方案。
+
+## 后续更自然的演进方向
+
+基于当前讨论，更自然的后续方向包括：
+
+- 在 dense 特征上加入显式缺失指示列
+- 扩大样本规模后重新验证当前策略是否稳定
+- 从 LR baseline 升级到 FM / FFM
+- 再进一步尝试 Wide & Deep / DeepFM
+- 后续如果继续往工程化 CTR 路线走，再考虑 DLRM 或 embedding-based ranking models
+
+## 当前已经应用到代码中的决定
+
+已经应用：
+
+- dense 缺失值由 `0` 改为 `-1`
+
+暂时保留不变：
+
+- baseline 仍然采用 logistic regression + one-hot
+
+原因不是它最强，而是它在当前阶段最适合做“流程与特征问题的暴露器”。
