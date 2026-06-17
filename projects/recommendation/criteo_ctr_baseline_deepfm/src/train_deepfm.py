@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -60,10 +61,44 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--learning-rate", type=float, default=1e-3)
+    parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--weight-decay", type=float, default=1e-5)
     parser.add_argument("--embedding-dim", type=int, default=8)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--fm-embedding-init-std",
+        type=float,
+        default=0.01,
+        help="Initialization std for FM embeddings.",
+    )
+    parser.add_argument(
+        "--fm-scale",
+        type=float,
+        default=0.1,
+        help="Scaling factor applied to the FM logit before summation.",
+    )
+    parser.add_argument(
+        "--grad-clip",
+        type=float,
+        default=1.0,
+        help="Max norm for gradient clipping. Use 0 or negative to disable.",
+    )
+    parser.add_argument(
+        "--disable-fm",
+        action="store_true",
+        help="Disable the FM branch for ablation debugging.",
+    )
+    parser.add_argument(
+        "--disable-deep",
+        action="store_true",
+        help="Disable the deep branch for ablation debugging.",
+    )
+    parser.add_argument(
+        "--learn-global-bias",
+        action="store_true",
+        help="Allow the global prior bias to keep training instead of staying fixed.",
+    )
     parser.add_argument(
         "--debug-logits",
         action="store_true",
@@ -80,6 +115,13 @@ def parse_args() -> argparse.Namespace:
         default=200,
         help="Number of repeated optimization steps in one-batch-overfit mode.",
     )
+    parser.add_argument(
+        "--save-best-by",
+        type=str,
+        default="roc_auc",
+        choices=["roc_auc", "pr_auc", "log_loss"],
+        help="Validation metric used to save the best checkpoint.",
+    )
     return parser.parse_args()
 
 
@@ -92,6 +134,12 @@ def set_seed(seed: int) -> None:
 def load_feature_config(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def compute_prior_bias(train_df: pd.DataFrame, label_col: str = "label") -> float:
+    ctr = float(train_df[label_col].mean())
+    ctr = min(max(ctr, 1e-6), 1 - 1e-6)
+    return math.log(ctr / (1.0 - ctr))
 
 
 def evaluate_model(
@@ -113,7 +161,12 @@ def evaluate_model(
             sparse_x = sparse_x.to(device)
             labels = labels.to(device)
 
-            logits = model(dense_x, sparse_x)
+            if debug_logits:
+                logits, components = model(
+                    dense_x, sparse_x, return_components=True
+                )
+            else:
+                logits = model(dense_x, sparse_x)
             loss = loss_fn(logits, labels)
             probs = torch.sigmoid(logits)
 
@@ -131,6 +184,14 @@ def evaluate_model(
             f"max={logits_tensor.max().item():.6f} | "
             f"mean={logits_tensor.mean().item():.6f}"
         )
+        for name, values in components.items():
+            values_tensor = values.detach().cpu().float()
+            print(
+                f"{name} stats | "
+                f"min={values_tensor.min().item():.6f} | "
+                f"max={values_tensor.max().item():.6f} | "
+                f"mean={values_tensor.mean().item():.6f}"
+            )
 
     metrics = {
         "roc_auc": float(roc_auc_score(all_labels, all_probs)),
@@ -234,9 +295,19 @@ def main() -> None:
         sparse_vocab_sizes=sparse_vocab_sizes,
         embedding_dim=args.embedding_dim,
         dropout=args.dropout,
+        global_bias_init=compute_prior_bias(train_df),
+        learnable_global_bias=args.learn_global_bias,
+        use_fm=not args.disable_fm,
+        use_deep=not args.disable_deep,
+        fm_embedding_init_std=args.fm_embedding_init_std,
+        fm_scale=args.fm_scale,
     ).to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=args.learning_rate,
+        weight_decay=args.weight_decay,
+    )
     loss_fn = nn.BCEWithLogitsLoss()
 
     if args.one_batch_overfit:
@@ -255,8 +326,14 @@ def main() -> None:
                 "batch_size": args.batch_size,
                 "one_batch_steps": args.one_batch_steps,
                 "learning_rate": args.learning_rate,
+                "weight_decay": args.weight_decay,
                 "embedding_dim": args.embedding_dim,
                 "dropout": args.dropout,
+                "learn_global_bias": args.learn_global_bias,
+                "use_fm": not args.disable_fm,
+                "use_deep": not args.disable_deep,
+                "fm_embedding_init_std": args.fm_embedding_init_std,
+                "fm_scale": args.fm_scale,
                 "device": str(device),
             },
         }
@@ -268,6 +345,9 @@ def main() -> None:
         return
 
     history: list[dict] = []
+    best_metric_value: float | None = None
+    best_epoch_record: dict | None = None
+    best_model_path = output_dir / "deepfm_model_best.pt"
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -282,6 +362,10 @@ def main() -> None:
             logits = model(dense_x, sparse_x)
             loss = loss_fn(logits, labels)
             loss.backward()
+            if args.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), max_norm=args.grad_clip
+                )
             optimizer.step()
 
             total_train_loss += loss.item() * labels.size(0)
@@ -302,6 +386,17 @@ def main() -> None:
         }
         history.append(epoch_record)
 
+        current_metric = valid_metrics[args.save_best_by]
+        if args.save_best_by == "log_loss":
+            is_better = best_metric_value is None or current_metric < best_metric_value
+        else:
+            is_better = best_metric_value is None or current_metric > best_metric_value
+
+        if is_better:
+            best_metric_value = current_metric
+            best_epoch_record = epoch_record
+            torch.save(model.state_dict(), best_model_path)
+
         print(
             f"Epoch {epoch}/{args.epochs} | "
             f"train_loss={avg_train_loss:.6f} | "
@@ -317,11 +412,20 @@ def main() -> None:
             "batch_size": args.batch_size,
             "epochs": args.epochs,
             "learning_rate": args.learning_rate,
+            "weight_decay": args.weight_decay,
             "embedding_dim": args.embedding_dim,
             "dropout": args.dropout,
+            "learn_global_bias": args.learn_global_bias,
+            "use_fm": not args.disable_fm,
+            "use_deep": not args.disable_deep,
+            "fm_embedding_init_std": args.fm_embedding_init_std,
+            "fm_scale": args.fm_scale,
+            "grad_clip": args.grad_clip,
+            "save_best_by": args.save_best_by,
             "device": str(device),
         },
         "history": history,
+        "best_epoch": best_epoch_record,
     }
 
     model_path = output_dir / "deepfm_model.pt"
@@ -340,6 +444,7 @@ def main() -> None:
 
     print("DeepFM training finished.")
     print(f"Model saved to: {model_path}")
+    print(f"Best model saved to: {best_model_path}")
     print(f"Metrics saved to: {metrics_path}")
     print(f"Validation predictions saved to: {valid_pred_path}")
 

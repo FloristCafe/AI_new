@@ -1,32 +1,32 @@
 {
-  "row_count": 2000,
+  "row_count": 200000,
   "column_count": 40,
   "train_shape": [
-    1600,
+    160000,
     40
   ],
   "valid_shape": [
-    400,
+    40000,
     40
   ],
-  "train_label_rate": 0.031875,
-  "valid_label_rate": 0.0325,
+  "train_label_rate": 0.0326125,
+  "valid_label_rate": 0.0326,
   "dense_feature_count": 13,
   "sparse_feature_count": 26,
   "rare_threshold": 5,
   "top_dense_missing_rate_before_fill": {
-    "integer_feature_4": 0.456,
-    "integer_feature_5": 0.433,
-    "integer_feature_11": 0.433,
-    "integer_feature_3": 0.249,
-    "integer_feature_13": 0.249
+    "integer_feature_5": 0.423745,
+    "integer_feature_11": 0.423745,
+    "integer_feature_4": 0.351815,
+    "integer_feature_3": 0.24182,
+    "integer_feature_13": 0.24182
   },
   "top_sparse_vocab_sizes": {
-    "categorical_feature_24": 61,
-    "categorical_feature_7": 60,
-    "categorical_feature_2": 59,
-    "categorical_feature_15": 57,
-    "categorical_feature_3": 53
+    "categorical_feature_3": 5282,
+    "categorical_feature_12": 4437,
+    "categorical_feature_24": 3953,
+    "categorical_feature_7": 3615,
+    "categorical_feature_2": 3094
   },
   "deepfm_ready": true
 }

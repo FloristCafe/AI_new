@@ -1,0 +1,22 @@
+{
+  "train": {
+    "roc_auc": 0.8789690901659541,
+    "pr_auc": 0.30163321682767125,
+    "log_loss": 0.10896409164098043
+  },
+  "valid": {
+    "roc_auc": 0.7269615024967309,
+    "pr_auc": 0.10106995149480916,
+    "log_loss": 0.13336128407337086
+  },
+  "metadata": {
+    "train_rows": 160000,
+    "valid_rows": 40000,
+    "feature_count": 39,
+    "dense_feature_count": 13,
+    "sparse_feature_count": 26,
+    "class_weight": "none",
+    "max_iter": 300,
+    "c": 0.3
+  }
+}

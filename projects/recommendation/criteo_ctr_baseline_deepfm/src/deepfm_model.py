@@ -10,6 +10,12 @@ class DeepFM(nn.Module):
         embedding_dim: int = 8,
         mlp_hidden_dims: list[int] | None = None,
         dropout: float = 0.1,
+        global_bias_init: float = 0.0,
+        learnable_global_bias: bool = False,
+        use_fm: bool = True,
+        use_deep: bool = True,
+        fm_embedding_init_std: float = 0.01,
+        fm_scale: float = 0.1,
     ) -> None:
         super().__init__()
 
@@ -19,6 +25,9 @@ class DeepFM(nn.Module):
         self.dense_feature_count = dense_feature_count
         self.sparse_feature_count = len(sparse_vocab_sizes)
         self.embedding_dim = embedding_dim
+        self.use_fm = use_fm
+        self.use_deep = use_deep
+        self.fm_scale = fm_scale
 
         # First-order linear term for dense features.
         self.linear_dense = nn.Linear(dense_feature_count, 1)
@@ -50,7 +59,27 @@ class DeepFM(nn.Module):
         self.deep_mlp = nn.Sequential(*mlp_layers)
         self.deep_output = nn.Linear(prev_dim, 1)
 
-    def forward(self, dense_x: torch.Tensor, sparse_x: torch.Tensor) -> torch.Tensor:
+        # Use a global prior bias to align the initial prediction with the
+        # empirical CTR prior. By default we freeze it, so it acts as a stable
+        # anchor instead of drifting deeper into the negative region.
+        global_bias_tensor = torch.tensor([global_bias_init], dtype=torch.float32)
+        if learnable_global_bias:
+            self.global_bias = nn.Parameter(global_bias_tensor)
+        else:
+            self.register_buffer("global_bias", global_bias_tensor)
+
+        self._init_fm_embeddings(fm_embedding_init_std)
+
+    def _init_fm_embeddings(self, init_std: float) -> None:
+        for embedding in self.fm_embeddings:
+            nn.init.normal_(embedding.weight, mean=0.0, std=init_std)
+
+    def forward(
+        self,
+        dense_x: torch.Tensor,
+        sparse_x: torch.Tensor,
+        return_components: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
         # Linear part: dense contribution + sparse first-order weights.
         linear_dense_logit = self.linear_dense(dense_x)
 
@@ -65,21 +94,48 @@ class DeepFM(nn.Module):
             sparse_embeddings.append(self.fm_embeddings[feature_index](ids))
 
         linear_sparse_logit = torch.stack(sparse_linear_terms, dim=1).sum(dim=1)
+        linear_logit = linear_dense_logit + linear_sparse_logit
 
         # FM second-order interaction term.
         stacked_embeddings = torch.stack(sparse_embeddings, dim=1)
-        summed_embeddings = stacked_embeddings.sum(dim=1)
-        square_of_sum = summed_embeddings.pow(2)
-        sum_of_square = (stacked_embeddings.pow(2)).sum(dim=1)
-        fm_logit = 0.5 * (square_of_sum - sum_of_square).sum(dim=1, keepdim=True)
+        if self.use_fm:
+            summed_embeddings = stacked_embeddings.sum(dim=1)
+            square_of_sum = summed_embeddings.pow(2)
+            sum_of_square = (stacked_embeddings.pow(2)).sum(dim=1)
+            fm_logit = (
+                0.5 * (square_of_sum - sum_of_square).sum(dim=1, keepdim=True)
+            ) * self.fm_scale
+        else:
+            fm_logit = torch.zeros_like(linear_dense_logit)
 
         # Deep component learns higher-order nonlinear patterns from dense values
         # and concatenated sparse embeddings.
-        deep_input = torch.cat(
-            [dense_x, stacked_embeddings.reshape(dense_x.size(0), -1)], dim=1
-        )
-        deep_hidden = self.deep_mlp(deep_input)
-        deep_logit = self.deep_output(deep_hidden)
+        if self.use_deep:
+            deep_input = torch.cat(
+                [dense_x, stacked_embeddings.reshape(dense_x.size(0), -1)], dim=1
+            )
+            deep_hidden = self.deep_mlp(deep_input)
+            deep_logit = self.deep_output(deep_hidden)
+        else:
+            deep_logit = torch.zeros_like(linear_dense_logit)
 
-        logits = linear_dense_logit + linear_sparse_logit + fm_logit + deep_logit
-        return logits.squeeze(1)
+        logits = (
+            linear_logit
+            + fm_logit
+            + deep_logit
+            + self.global_bias.view(1, 1)
+        )
+        final_logits = logits.squeeze(1)
+
+        if return_components:
+            components = {
+                "linear_dense_logit": linear_dense_logit.squeeze(1),
+                "linear_sparse_logit": linear_sparse_logit.squeeze(1),
+                "linear_logit": linear_logit.squeeze(1),
+                "fm_logit": fm_logit.squeeze(1),
+                "deep_logit": deep_logit.squeeze(1),
+                "global_bias": self.global_bias.expand_as(final_logits),
+            }
+            return final_logits, components
+
+        return final_logits
