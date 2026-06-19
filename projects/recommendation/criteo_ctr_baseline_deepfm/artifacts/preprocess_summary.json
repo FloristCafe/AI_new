@@ -3,17 +3,19 @@
   "column_count": 40,
   "train_shape": [
     160000,
-    40
+    53
   ],
   "valid_shape": [
     40000,
-    40
+    53
   ],
   "train_label_rate": 0.0326125,
   "valid_label_rate": 0.0326,
   "dense_feature_count": 13,
+  "dense_bucket_feature_count": 13,
   "sparse_feature_count": 26,
   "rare_threshold": 5,
+  "dense_bucket_count": 32,
   "top_dense_missing_rate_before_fill": {
     "integer_feature_5": 0.423745,
     "integer_feature_11": 0.423745,

@@ -6,6 +6,7 @@ class DeepFM(nn.Module):
     def __init__(
         self,
         dense_feature_count: int,
+        dense_bucket_vocab_sizes: list[int],
         sparse_vocab_sizes: list[int],
         embedding_dim: int = 8,
         mlp_hidden_dims: list[int] | None = None,
@@ -23,13 +24,15 @@ class DeepFM(nn.Module):
             mlp_hidden_dims = [64, 32]
 
         self.dense_feature_count = dense_feature_count
+        self.dense_bucket_feature_count = len(dense_bucket_vocab_sizes)
         self.sparse_feature_count = len(sparse_vocab_sizes)
         self.embedding_dim = embedding_dim
         self.use_fm = use_fm
         self.use_deep = use_deep
         self.fm_scale = fm_scale
 
-        # First-order linear term for dense features.
+        # Keep dense floats in the linear branch so the model can still learn
+        # a direct first-order response from original continuous values.
         self.linear_dense = nn.Linear(dense_feature_count, 1)
 
         # First-order linear term for sparse ids.
@@ -37,12 +40,23 @@ class DeepFM(nn.Module):
             [nn.Embedding(vocab_size, 1) for vocab_size in sparse_vocab_sizes]
         )
 
-        # Shared embeddings used by both FM and deep parts.
+        # Shared sparse embeddings used by both FM and deep parts.
         self.fm_embeddings = nn.ModuleList(
             [nn.Embedding(vocab_size, embedding_dim) for vocab_size in sparse_vocab_sizes]
         )
 
-        deep_input_dim = dense_feature_count + self.sparse_feature_count * embedding_dim
+        # Dense bucket ids are embedded before entering the deep branch so the
+        # dense and sparse signals live in the same representation space.
+        self.dense_bucket_embeddings = nn.ModuleList(
+            [
+                nn.Embedding(vocab_size, embedding_dim)
+                for vocab_size in dense_bucket_vocab_sizes
+            ]
+        )
+
+        deep_input_dim = (
+            self.dense_bucket_feature_count + self.sparse_feature_count
+        ) * embedding_dim
         mlp_layers: list[nn.Module] = []
         prev_dim = deep_input_dim
 
@@ -50,6 +64,7 @@ class DeepFM(nn.Module):
             mlp_layers.extend(
                 [
                     nn.Linear(prev_dim, hidden_dim),
+                    nn.BatchNorm1d(hidden_dim),
                     nn.ReLU(),
                     nn.Dropout(dropout),
                 ]
@@ -59,9 +74,6 @@ class DeepFM(nn.Module):
         self.deep_mlp = nn.Sequential(*mlp_layers)
         self.deep_output = nn.Linear(prev_dim, 1)
 
-        # Use a global prior bias to align the initial prediction with the
-        # empirical CTR prior. By default we freeze it, so it acts as a stable
-        # anchor instead of drifting deeper into the negative region.
         global_bias_tensor = torch.tensor([global_bias_init], dtype=torch.float32)
         if learnable_global_bias:
             self.global_bias = nn.Parameter(global_bias_tensor)
@@ -69,18 +81,23 @@ class DeepFM(nn.Module):
             self.register_buffer("global_bias", global_bias_tensor)
 
         self._init_fm_embeddings(fm_embedding_init_std)
+        self._init_dense_bucket_embeddings(fm_embedding_init_std)
 
     def _init_fm_embeddings(self, init_std: float) -> None:
         for embedding in self.fm_embeddings:
             nn.init.normal_(embedding.weight, mean=0.0, std=init_std)
 
+    def _init_dense_bucket_embeddings(self, init_std: float) -> None:
+        for embedding in self.dense_bucket_embeddings:
+            nn.init.normal_(embedding.weight, mean=0.0, std=init_std)
+
     def forward(
         self,
         dense_x: torch.Tensor,
+        dense_bucket_x: torch.Tensor,
         sparse_x: torch.Tensor,
         return_components: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        # Linear part: dense contribution + sparse first-order weights.
         linear_dense_logit = self.linear_dense(dense_x)
 
         sparse_linear_terms = []
@@ -96,23 +113,34 @@ class DeepFM(nn.Module):
         linear_sparse_logit = torch.stack(sparse_linear_terms, dim=1).sum(dim=1)
         linear_logit = linear_dense_logit + linear_sparse_logit
 
-        # FM second-order interaction term.
-        stacked_embeddings = torch.stack(sparse_embeddings, dim=1)
+        stacked_sparse_embeddings = torch.stack(sparse_embeddings, dim=1)
         if self.use_fm:
-            summed_embeddings = stacked_embeddings.sum(dim=1)
+            summed_embeddings = stacked_sparse_embeddings.sum(dim=1)
             square_of_sum = summed_embeddings.pow(2)
-            sum_of_square = (stacked_embeddings.pow(2)).sum(dim=1)
+            sum_of_square = (stacked_sparse_embeddings.pow(2)).sum(dim=1)
             fm_logit = (
                 0.5 * (square_of_sum - sum_of_square).sum(dim=1, keepdim=True)
             ) * self.fm_scale
         else:
             fm_logit = torch.zeros_like(linear_dense_logit)
 
-        # Deep component learns higher-order nonlinear patterns from dense values
-        # and concatenated sparse embeddings.
         if self.use_deep:
+            dense_bucket_embeddings = []
+            for feature_index in range(self.dense_bucket_feature_count):
+                ids = dense_bucket_x[:, feature_index]
+                dense_bucket_embeddings.append(
+                    self.dense_bucket_embeddings[feature_index](ids)
+                )
+
+            stacked_dense_bucket_embeddings = torch.stack(
+                dense_bucket_embeddings, dim=1
+            )
             deep_input = torch.cat(
-                [dense_x, stacked_embeddings.reshape(dense_x.size(0), -1)], dim=1
+                [
+                    stacked_dense_bucket_embeddings.reshape(dense_x.size(0), -1),
+                    stacked_sparse_embeddings.reshape(dense_x.size(0), -1),
+                ],
+                dim=1,
             )
             deep_hidden = self.deep_mlp(deep_input)
             deep_logit = self.deep_output(deep_hidden)

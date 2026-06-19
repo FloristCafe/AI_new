@@ -2,6 +2,7 @@ import argparse
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
@@ -39,6 +40,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=42,
         help="Random seed for train/valid split.",
+    )
+    parser.add_argument(
+        "--dense-bucket-count",
+        type=int,
+        default=32,
+        help="Number of non-missing quantile buckets for each dense feature.",
     )
     return parser.parse_args()
 
@@ -79,6 +86,56 @@ def apply_dense_normalizer(
         mean = stats[col]["mean"]
         std = stats[col]["std"]
         df[col] = ((df[col] - mean) / std).astype("float32")
+    return df
+
+
+def fit_dense_bucket_rules(
+    train_df: pd.DataFrame, dense_cols: list[str], bucket_count: int
+) -> dict[str, dict[str, list[float] | int]]:
+    bucket_rules: dict[str, dict[str, list[float] | int]] = {}
+
+    for col in dense_cols:
+        non_missing = train_df.loc[train_df[col] != -1, col].astype("float64")
+        if non_missing.empty:
+            edges: list[float] = []
+        else:
+            transformed = np.log1p(np.clip(non_missing.to_numpy(), a_min=0.0, a_max=None))
+            quantiles = np.linspace(0.0, 1.0, bucket_count + 1)[1:-1]
+            raw_edges = np.quantile(transformed, quantiles)
+            unique_edges = np.unique(raw_edges)
+            edges = [float(x) for x in unique_edges.tolist()]
+
+        bucket_rules[col] = {
+            "edges": edges,
+            # bucket 0 is reserved for missing dense values
+            "vocab_size": len(edges) + 2,
+        }
+
+    return bucket_rules
+
+
+def apply_dense_bucket_rules(
+    df: pd.DataFrame, dense_cols: list[str], bucket_rules: dict[str, dict[str, list[float] | int]]
+) -> pd.DataFrame:
+    df = df.copy()
+
+    for col in dense_cols:
+        bucket_col = f"{col}_bucket"
+        values = df[col].astype("float64")
+        bucket_ids = np.zeros(len(df), dtype=np.int32)
+        non_missing_mask = values.to_numpy() != -1
+
+        if non_missing_mask.any():
+            clipped = np.clip(values.to_numpy()[non_missing_mask], a_min=0.0, a_max=None)
+            transformed = np.log1p(clipped)
+            edges = np.array(bucket_rules[col]["edges"], dtype=np.float64)
+            if edges.size == 0:
+                bucket_ids[non_missing_mask] = 1
+            else:
+                bucket_ids[non_missing_mask] = np.digitize(transformed, edges, right=False) + 1
+
+        df[bucket_col] = bucket_ids.astype("int32")
+
     return df
 
 
@@ -130,15 +187,19 @@ def apply_sparse_mappings(
 
 def build_feature_config(
     dense_cols: list[str],
+    dense_bucket_cols: list[str],
     sparse_cols: list[str],
     vocab_sizes: dict[str, int],
     dense_stats: dict[str, dict[str, float]],
+    dense_bucket_rules: dict[str, dict[str, list[float] | int]],
 ) -> dict:
     return {
         "dense_features": dense_cols,
+        "dense_bucket_features": dense_bucket_cols,
         "sparse_features": sparse_cols,
         "sparse_vocab_sizes": vocab_sizes,
         "dense_normalization": dense_stats,
+        "dense_bucket_rules": dense_bucket_rules,
         "label_col": "label",
     }
 
@@ -148,9 +209,11 @@ def build_summary(
     train_df: pd.DataFrame,
     valid_df: pd.DataFrame,
     dense_cols: list[str],
+    dense_bucket_cols: list[str],
     sparse_cols: list[str],
     vocab_sizes: dict[str, int],
     rare_threshold: int,
+    dense_bucket_count: int,
 ) -> dict:
     dense_missing_rate = raw_df[dense_cols].isna().mean().sort_values(ascending=False)
     top_dense_missing = {k: float(v) for k, v in dense_missing_rate.head(5).items()}
@@ -166,8 +229,10 @@ def build_summary(
         "train_label_rate": float(train_df["label"].mean()),
         "valid_label_rate": float(valid_df["label"].mean()),
         "dense_feature_count": len(dense_cols),
+        "dense_bucket_feature_count": len(dense_bucket_cols),
         "sparse_feature_count": len(sparse_cols),
         "rare_threshold": rare_threshold,
+        "dense_bucket_count": dense_bucket_count,
         "top_dense_missing_rate_before_fill": top_dense_missing,
         "top_sparse_vocab_sizes": top_vocab_sizes,
         "deepfm_ready": True,
@@ -199,6 +264,13 @@ def main() -> None:
     train_df = apply_rare_category_rules(train_df, sparse_cols, rare_rules)
     valid_df = apply_rare_category_rules(valid_df, sparse_cols, rare_rules)
 
+    dense_bucket_rules = fit_dense_bucket_rules(
+        train_df, dense_cols, args.dense_bucket_count
+    )
+    train_df = apply_dense_bucket_rules(train_df, dense_cols, dense_bucket_rules)
+    valid_df = apply_dense_bucket_rules(valid_df, dense_cols, dense_bucket_rules)
+    dense_bucket_cols = [f"{col}_bucket" for col in dense_cols]
+
     dense_stats = fit_dense_normalizer(train_df, dense_cols)
     train_df = apply_dense_normalizer(train_df, dense_cols, dense_stats)
     valid_df = apply_dense_normalizer(valid_df, dense_cols, dense_stats)
@@ -208,16 +280,23 @@ def main() -> None:
     valid_df = apply_sparse_mappings(valid_df, sparse_cols, mappings)
 
     feature_config = build_feature_config(
-        dense_cols, sparse_cols, vocab_sizes, dense_stats
+        dense_cols,
+        dense_bucket_cols,
+        sparse_cols,
+        vocab_sizes,
+        dense_stats,
+        dense_bucket_rules,
     )
     summary = build_summary(
         raw_df=raw_df,
         train_df=train_df,
         valid_df=valid_df,
         dense_cols=dense_cols,
+        dense_bucket_cols=dense_bucket_cols,
         sparse_cols=sparse_cols,
         vocab_sizes=vocab_sizes,
         rare_threshold=args.rare_threshold,
+        dense_bucket_count=args.dense_bucket_count,
     )
 
     train_path = output_dir / "train_deepfm.parquet"

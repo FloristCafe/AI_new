@@ -17,18 +17,29 @@ class CriteoDeepFMDataset(Dataset):
         self,
         df: pd.DataFrame,
         dense_cols: list[str],
+        dense_bucket_cols: list[str],
         sparse_cols: list[str],
         label_col: str = "label",
     ) -> None:
         self.dense_x = torch.tensor(df[dense_cols].values, dtype=torch.float32)
+        self.dense_bucket_x = torch.tensor(
+            df[dense_bucket_cols].values, dtype=torch.long
+        )
         self.sparse_x = torch.tensor(df[sparse_cols].values, dtype=torch.long)
         self.labels = torch.tensor(df[label_col].values, dtype=torch.float32)
 
     def __len__(self) -> int:
         return len(self.labels)
 
-    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        return self.dense_x[index], self.sparse_x[index], self.labels[index]
+    def __getitem__(
+        self, index: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        return (
+            self.dense_x[index],
+            self.dense_bucket_x[index],
+            self.sparse_x[index],
+            self.labels[index],
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -63,6 +74,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-5)
+    parser.add_argument(
+        "--embedding-weight-decay",
+        type=float,
+        default=None,
+        help="If set, apply L2 only to embedding tables and disable L2 on other weights.",
+    )
     parser.add_argument("--embedding-dim", type=int, default=8)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
@@ -142,6 +159,47 @@ def compute_prior_bias(train_df: pd.DataFrame, label_col: str = "label") -> floa
     return math.log(ctr / (1.0 - ctr))
 
 
+def build_optimizer(
+    model: DeepFM,
+    learning_rate: float,
+    weight_decay: float,
+    embedding_weight_decay: float | None = None,
+) -> torch.optim.Optimizer:
+    decay_params = []
+    embedding_decay_params = []
+    no_decay_params = []
+
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if name.endswith("bias") or "bn" in name.lower():
+            no_decay_params.append(param)
+        elif embedding_weight_decay is not None and "embedding" in name.lower():
+            embedding_decay_params.append(param)
+        else:
+            decay_params.append(param)
+
+    param_groups = []
+    if embedding_weight_decay is None:
+        if decay_params:
+            param_groups.append({"params": decay_params, "weight_decay": weight_decay})
+    else:
+        if decay_params:
+            param_groups.append({"params": decay_params, "weight_decay": 0.0})
+        if embedding_decay_params:
+            param_groups.append(
+                {
+                    "params": embedding_decay_params,
+                    "weight_decay": embedding_weight_decay,
+                }
+            )
+
+    if no_decay_params:
+        param_groups.append({"params": no_decay_params, "weight_decay": 0.0})
+
+    return torch.optim.Adam(param_groups, lr=learning_rate)
+
+
 def evaluate_model(
     model: DeepFM,
     dataloader: DataLoader,
@@ -154,19 +212,22 @@ def evaluate_model(
     all_probs: list[float] = []
     all_labels: list[float] = []
     all_logits: list[float] = []
+    last_components: dict[str, torch.Tensor] | None = None
 
     with torch.no_grad():
-        for dense_x, sparse_x, labels in dataloader:
+        for dense_x, dense_bucket_x, sparse_x, labels in dataloader:
             dense_x = dense_x.to(device)
+            dense_bucket_x = dense_bucket_x.to(device)
             sparse_x = sparse_x.to(device)
             labels = labels.to(device)
 
             if debug_logits:
                 logits, components = model(
-                    dense_x, sparse_x, return_components=True
+                    dense_x, dense_bucket_x, sparse_x, return_components=True
                 )
+                last_components = components
             else:
-                logits = model(dense_x, sparse_x)
+                logits = model(dense_x, dense_bucket_x, sparse_x)
             loss = loss_fn(logits, labels)
             probs = torch.sigmoid(logits)
 
@@ -176,7 +237,7 @@ def evaluate_model(
             all_logits.extend(logits.cpu().tolist())
 
     avg_loss = total_loss / len(dataloader.dataset)
-    if debug_logits and all_logits:
+    if debug_logits and all_logits and last_components is not None:
         logits_tensor = torch.tensor(all_logits, dtype=torch.float32)
         print(
             "Eval logits stats | "
@@ -184,7 +245,7 @@ def evaluate_model(
             f"max={logits_tensor.max().item():.6f} | "
             f"mean={logits_tensor.mean().item():.6f}"
         )
-        for name, values in components.items():
+        for name, values in last_components.items():
             values_tensor = values.detach().cpu().float()
             print(
                 f"{name} stats | "
@@ -210,8 +271,9 @@ def run_one_batch_overfit(
     loss_fn: nn.Module,
     steps: int,
 ) -> list[dict[str, float]]:
-    dense_x, sparse_x, labels = next(iter(train_loader))
+    dense_x, dense_bucket_x, sparse_x, labels = next(iter(train_loader))
     dense_x = dense_x.to(device)
+    dense_bucket_x = dense_bucket_x.to(device)
     sparse_x = sparse_x.to(device)
     labels = labels.to(device)
     history: list[dict[str, float]] = []
@@ -219,6 +281,7 @@ def run_one_batch_overfit(
     print(
         "One-batch mode | "
         f"dense_shape={tuple(dense_x.shape)} | "
+        f"dense_bucket_shape={tuple(dense_bucket_x.shape)} | "
         f"sparse_shape={tuple(sparse_x.shape)} | "
         f"label_mean={labels.float().mean().item():.6f}"
     )
@@ -226,7 +289,7 @@ def run_one_batch_overfit(
     for step in range(1, steps + 1):
         model.train()
         optimizer.zero_grad()
-        logits = model(dense_x, sparse_x)
+        logits = model(dense_x, dense_bucket_x, sparse_x)
         loss = loss_fn(logits, labels)
         loss.backward()
         optimizer.step()
@@ -274,13 +337,22 @@ def main() -> None:
     feature_config = load_feature_config(feature_config_path)
 
     dense_cols = feature_config["dense_features"]
+    dense_bucket_cols = feature_config["dense_bucket_features"]
     sparse_cols = feature_config["sparse_features"]
+    dense_bucket_vocab_sizes = [
+        feature_config["dense_bucket_rules"][col.replace("_bucket", "")]["vocab_size"]
+        for col in dense_bucket_cols
+    ]
     sparse_vocab_sizes = [
         feature_config["sparse_vocab_sizes"][col] for col in sparse_cols
     ]
 
-    train_dataset = CriteoDeepFMDataset(train_df, dense_cols, sparse_cols)
-    valid_dataset = CriteoDeepFMDataset(valid_df, dense_cols, sparse_cols)
+    train_dataset = CriteoDeepFMDataset(
+        train_df, dense_cols, dense_bucket_cols, sparse_cols
+    )
+    valid_dataset = CriteoDeepFMDataset(
+        valid_df, dense_cols, dense_bucket_cols, sparse_cols
+    )
 
     train_loader = DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True
@@ -292,6 +364,7 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = DeepFM(
         dense_feature_count=len(dense_cols),
+        dense_bucket_vocab_sizes=dense_bucket_vocab_sizes,
         sparse_vocab_sizes=sparse_vocab_sizes,
         embedding_dim=args.embedding_dim,
         dropout=args.dropout,
@@ -303,10 +376,11 @@ def main() -> None:
         fm_scale=args.fm_scale,
     ).to(device)
 
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=args.learning_rate,
-        weight_decay=args.weight_decay,
+    optimizer = build_optimizer(
+        model,
+        args.learning_rate,
+        args.weight_decay,
+        args.embedding_weight_decay,
     )
     loss_fn = nn.BCEWithLogitsLoss()
 
@@ -327,6 +401,7 @@ def main() -> None:
                 "one_batch_steps": args.one_batch_steps,
                 "learning_rate": args.learning_rate,
                 "weight_decay": args.weight_decay,
+                "embedding_weight_decay": args.embedding_weight_decay,
                 "embedding_dim": args.embedding_dim,
                 "dropout": args.dropout,
                 "learn_global_bias": args.learn_global_bias,
@@ -353,13 +428,14 @@ def main() -> None:
         model.train()
         total_train_loss = 0.0
 
-        for dense_x, sparse_x, labels in train_loader:
+        for dense_x, dense_bucket_x, sparse_x, labels in train_loader:
             dense_x = dense_x.to(device)
+            dense_bucket_x = dense_bucket_x.to(device)
             sparse_x = sparse_x.to(device)
             labels = labels.to(device)
 
             optimizer.zero_grad()
-            logits = model(dense_x, sparse_x)
+            logits = model(dense_x, dense_bucket_x, sparse_x)
             loss = loss_fn(logits, labels)
             loss.backward()
             if args.grad_clip > 0:
@@ -413,6 +489,7 @@ def main() -> None:
             "epochs": args.epochs,
             "learning_rate": args.learning_rate,
             "weight_decay": args.weight_decay,
+            "embedding_weight_decay": args.embedding_weight_decay,
             "embedding_dim": args.embedding_dim,
             "dropout": args.dropout,
             "learn_global_bias": args.learn_global_bias,
