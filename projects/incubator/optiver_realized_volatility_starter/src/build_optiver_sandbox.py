@@ -84,7 +84,14 @@ def select_train_rows(
 def filter_parquet_by_keys(
     parquet_path: Path, stock_ids: list[int], sample_keys: pd.DataFrame
 ) -> pd.DataFrame:
-    df = pd.read_parquet(parquet_path, filters=[("stock_id", "in", stock_ids)])
+    time_ids = sorted(sample_keys["time_id"].unique().tolist())
+    df = pd.read_parquet(
+        parquet_path,
+        filters=[
+            ("stock_id", "in", stock_ids),
+            ("time_id", "in", time_ids),
+        ],
+    )
     merged = df.merge(sample_keys, on=["stock_id", "time_id"], how="inner")
     return merged.sort_values(["stock_id", "time_id", "seconds_in_bucket"]).reset_index(
         drop=True
@@ -141,6 +148,7 @@ def main() -> None:
     summary = {
         "selected_stock_ids": selected_stock_ids,
         "time_ids_per_stock": args.time_ids_per_stock,
+        "sort_order": args.sort_order,
         "sample_train_shape": list(sample_train.shape),
         "sample_book_shape": list(sample_book.shape),
         "sample_trade_shape": list(sample_trade.shape),

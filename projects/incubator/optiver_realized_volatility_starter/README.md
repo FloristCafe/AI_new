@@ -12,6 +12,7 @@
 - `src/build_optiver_sandbox.py`
 - `src/build_optiver_baseline_features.py`
 - `src/build_optiver_features_v2.py`
+- `src/build_optiver_knn_features.py`
 - `src/train_optiver_baseline.py`
 
 建议运行顺序：
@@ -30,6 +31,10 @@ python "D:\Python\Artificial Intelligence\projects\incubator\optiver_realized_vo
 
 ```powershell
 python "D:\Python\Artificial Intelligence\projects\incubator\optiver_realized_volatility_starter\src\build_optiver_features_v2.py"
+```
+
+```powershell
+python "D:\Python\Artificial Intelligence\projects\incubator\optiver_realized_volatility_starter\src\build_optiver_knn_features.py"
 ```
 
 ```powershell
