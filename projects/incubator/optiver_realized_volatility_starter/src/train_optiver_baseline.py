@@ -1,4 +1,5 @@
 import argparse
+import copy
 import json
 from pathlib import Path
 
@@ -107,6 +108,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.6,
         help="Prediction weight for LightGBM in the MLP + LightGBM ensemble.",
+    )
+    parser.add_argument(
+        "--bagging-size",
+        type=int,
+        default=1,
+        help="How many bootstrap models to train and average. Use 3 for 3-bagging.",
     )
     return parser.parse_args()
 
@@ -230,6 +237,75 @@ def evaluate_predictions(y_true: pd.Series, y_pred: np.ndarray) -> dict[str, flo
     }
 
 
+def make_bootstrap_sample(
+    X_train: pd.DataFrame, y_train: pd.Series, seed: int
+) -> tuple[pd.DataFrame, pd.Series]:
+    rng = np.random.default_rng(seed)
+    sample_idx = rng.integers(0, len(X_train), size=len(X_train))
+    X_boot = X_train.iloc[sample_idx].reset_index(drop=True)
+    y_boot = y_train.iloc[sample_idx].reset_index(drop=True)
+    return X_boot, y_boot
+
+
+def train_bagged_model(
+    model_name: str,
+    args: argparse.Namespace,
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_valid: pd.DataFrame,
+) -> tuple[np.ndarray, np.ndarray]:
+    if args.bagging_size <= 1:
+        model = build_model(model_name, args)
+        model.fit(X_train, y_train)
+        train_pred = model.predict(X_train)
+        valid_pred = model.predict(X_valid)
+        if model_name == "mlp":
+            train_pred = np.clip(train_pred, 0.0, None)
+            valid_pred = np.clip(valid_pred, 0.0, None)
+        return train_pred, valid_pred
+
+    train_preds: list[np.ndarray] = []
+    valid_preds: list[np.ndarray] = []
+
+    for bag_idx in range(args.bagging_size):
+        bag_args = copy.deepcopy(args)
+        seed = 42 + bag_idx
+        X_boot, y_boot = make_bootstrap_sample(X_train, y_train, seed)
+
+        if model_name == "lightgbm":
+            bag_args.lgbm_n_estimators = args.lgbm_n_estimators
+        model = build_model(model_name, bag_args)
+        model.fit(X_boot, y_boot)
+
+        bag_train_pred = model.predict(X_train)
+        bag_valid_pred = model.predict(X_valid)
+        if model_name == "mlp":
+            bag_train_pred = np.clip(bag_train_pred, 0.0, None)
+            bag_valid_pred = np.clip(bag_valid_pred, 0.0, None)
+
+        train_preds.append(bag_train_pred)
+        valid_preds.append(bag_valid_pred)
+
+    return np.mean(train_preds, axis=0), np.mean(valid_preds, axis=0)
+
+
+def train_bagged_component(
+    model_name: str,
+    args: argparse.Namespace,
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_valid: pd.DataFrame,
+) -> tuple[np.ndarray, np.ndarray]:
+    train_pred, valid_pred = train_bagged_model(
+        model_name=model_name,
+        args=args,
+        X_train=X_train,
+        y_train=y_train,
+        X_valid=X_valid,
+    )
+    return train_pred, valid_pred
+
+
 def main() -> None:
     args = parse_args()
     feature_table_path = Path(args.feature_table)
@@ -262,17 +338,20 @@ def main() -> None:
     if args.model == "mlp_lightgbm_ensemble":
         if not 0.0 <= args.ensemble_lgbm_weight <= 1.0:
             raise ValueError("ensemble_lgbm_weight must be between 0 and 1.")
-
-        lightgbm_model = build_lightgbm_model(args)
-        mlp_model = build_mlp_model(args)
-
-        lightgbm_model.fit(X_train, y_train)
-        mlp_model.fit(X_train, y_train)
-
-        lgbm_train_pred = lightgbm_model.predict(X_train)
-        lgbm_valid_pred = lightgbm_model.predict(X_valid)
-        mlp_train_pred = np.clip(mlp_model.predict(X_train), 0.0, None)
-        mlp_valid_pred = np.clip(mlp_model.predict(X_valid), 0.0, None)
+        lgbm_train_pred, lgbm_valid_pred = train_bagged_component(
+            model_name="lightgbm",
+            args=args,
+            X_train=X_train,
+            y_train=y_train,
+            X_valid=X_valid,
+        )
+        mlp_train_pred, mlp_valid_pred = train_bagged_component(
+            model_name="mlp",
+            args=args,
+            X_train=X_train,
+            y_train=y_train,
+            X_valid=X_valid,
+        )
 
         lgbm_weight = args.ensemble_lgbm_weight
         mlp_weight = 1.0 - lgbm_weight
@@ -295,13 +374,13 @@ def main() -> None:
             },
         }
     else:
-        model = build_model(args.model, args)
-        model.fit(X_train, y_train)
-        train_pred = model.predict(X_train)
-        valid_pred = model.predict(X_valid)
-        if args.model == "mlp":
-            train_pred = np.clip(train_pred, 0.0, None)
-            valid_pred = np.clip(valid_pred, 0.0, None)
+        train_pred, valid_pred = train_bagged_model(
+            model_name=args.model,
+            args=args,
+            X_train=X_train,
+            y_train=y_train,
+            X_valid=X_valid,
+        )
 
     metrics = {
         "train": evaluate_predictions(y_train, train_pred),
@@ -324,6 +403,7 @@ def main() -> None:
             "mlp_learning_rate_init": args.mlp_learning_rate_init,
             "mlp_max_iter": args.mlp_max_iter,
             "ensemble_lgbm_weight": args.ensemble_lgbm_weight,
+            "bagging_size": args.bagging_size,
         },
     }
     if component_weights is not None:

@@ -161,6 +161,12 @@ def parse_args() -> argparse.Namespace:
         default=0.6,
         help="Prediction weight for LightGBM in the MLP + LightGBM ensemble.",
     )
+    parser.add_argument(
+        "--bagging-size",
+        type=int,
+        default=1,
+        help="How many bootstrap models to train and average. Use 3 for 3-bagging.",
+    )
     return parser.parse_args()
 
 
@@ -241,6 +247,8 @@ def main() -> None:
         args.model,
         "--valid-ratio",
         str(args.valid_ratio),
+        "--bagging-size",
+        str(args.bagging_size),
     ]
     if args.model in {"lightgbm", "mlp_lightgbm_ensemble"}:
         train_cmd.extend(
