@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from torch import nn
@@ -16,7 +17,7 @@ DEFAULT_TENSOR_DIR = Path(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train a dual-branch CNN on Optiver book/trade tensors."
+        description="Train Optiver CNN with book-only, trade-only or dual-branch modes."
     )
     parser.add_argument(
         "--tensor-dir",
@@ -31,6 +32,13 @@ def parse_args() -> argparse.Namespace:
         help="Directory for metrics and predictions. Defaults to tensor_dir/cnn_models.",
     )
     parser.add_argument(
+        "--mode",
+        type=str,
+        default="dual",
+        choices=["book_only", "trade_only", "dual"],
+        help="Which branch configuration to train.",
+    )
+    parser.add_argument(
         "--valid-ratio",
         type=float,
         default=0.2,
@@ -39,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--epochs",
         type=int,
-        default=20,
+        default=30,
         help="Training epochs.",
     )
     parser.add_argument(
@@ -51,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--learning-rate",
         type=float,
-        default=1e-3,
+        default=5e-4,
         help="Optimizer learning rate.",
     )
     parser.add_argument(
@@ -70,13 +78,19 @@ def parse_args() -> argparse.Namespace:
         "--book-weight",
         type=float,
         default=0.5,
-        help="Weight of the book branch contribution.",
+        help="Weight of the book branch contribution in dual mode.",
     )
     parser.add_argument(
         "--trade-weight",
         type=float,
         default=0.5,
-        help="Weight of the trade branch contribution.",
+        help="Weight of the trade branch contribution in dual mode.",
+    )
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=0.2,
+        help="Dropout in the prediction head.",
     )
     parser.add_argument(
         "--device",
@@ -101,26 +115,34 @@ def evaluate_predictions(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, fl
     }
 
 
+def standardize_tensor(
+    train_tensor: np.ndarray,
+    valid_tensor: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    channel_mean = train_tensor.mean(axis=(0, 2), keepdims=True)
+    channel_std = train_tensor.std(axis=(0, 2), keepdims=True)
+    channel_std = np.where(channel_std < 1e-6, 1.0, channel_std)
+    train_scaled = (train_tensor - channel_mean) / channel_std
+    valid_scaled = (valid_tensor - channel_mean) / channel_std
+    return train_scaled, valid_scaled, channel_mean.squeeze(), channel_std.squeeze()
+
+
 class OptiverTensorDataset(Dataset):
     def __init__(
         self,
         book_tensor: np.ndarray,
         trade_tensor: np.ndarray,
-        target: np.ndarray,
+        target_scaled: np.ndarray,
     ) -> None:
         self.book_tensor = torch.tensor(book_tensor, dtype=torch.float32)
         self.trade_tensor = torch.tensor(trade_tensor, dtype=torch.float32)
-        self.target = torch.tensor(target, dtype=torch.float32)
+        self.target = torch.tensor(target_scaled, dtype=torch.float32)
 
     def __len__(self) -> int:
         return len(self.target)
 
     def __getitem__(self, idx: int):
-        return (
-            self.book_tensor[idx],
-            self.trade_tensor[idx],
-            self.target[idx],
-        )
+        return self.book_tensor[idx], self.trade_tensor[idx], self.target[idx]
 
 
 class ConvBranch(nn.Module):
@@ -128,8 +150,13 @@ class ConvBranch(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Conv1d(in_channels, 32, kernel_size=5, padding=2),
+            nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.Conv1d(32, 64, kernel_size=5, padding=2),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Conv1d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.AdaptiveAvgPool1d(1),
         )
@@ -143,28 +170,40 @@ class ConvBranch(nn.Module):
 class DualBranchCNN(nn.Module):
     def __init__(
         self,
+        mode: str,
         book_channels: int,
         trade_channels: int,
         hidden_dim: int,
+        dropout: float,
         book_weight: float,
         trade_weight: float,
     ) -> None:
         super().__init__()
-        self.book_branch = ConvBranch(book_channels, hidden_dim)
-        self.trade_branch = ConvBranch(trade_channels, hidden_dim)
+        self.mode = mode
+        self.book_branch = ConvBranch(book_channels, hidden_dim) if book_channels > 0 else None
+        self.trade_branch = (
+            ConvBranch(trade_channels, hidden_dim) if trade_channels > 0 else None
+        )
+
         self.book_weight = book_weight
         self.trade_weight = trade_weight
         self.head = nn.Sequential(
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
 
     def forward(self, book_x: torch.Tensor, trade_x: torch.Tensor) -> torch.Tensor:
-        book_feat = self.book_branch(book_x)
-        trade_feat = self.trade_branch(trade_x)
-        fused = self.book_weight * book_feat + self.trade_weight * trade_feat
+        if self.mode == "book_only":
+            fused = self.book_branch(book_x)
+        elif self.mode == "trade_only":
+            fused = self.trade_branch(trade_x)
+        else:
+            book_feat = self.book_branch(book_x)
+            trade_feat = self.trade_branch(trade_x)
+            fused = self.book_weight * book_feat + self.trade_weight * trade_feat
         return self.head(fused).squeeze(-1)
 
 
@@ -176,11 +215,11 @@ def run_epoch(
 ) -> tuple[float, np.ndarray, np.ndarray]:
     is_train = optimizer is not None
     model.train(is_train)
+    criterion = nn.MSELoss()
 
     losses: list[float] = []
     preds: list[np.ndarray] = []
     targets: list[np.ndarray] = []
-    criterion = nn.MSELoss()
 
     for book_x, trade_x, target in loader:
         book_x = book_x.to(device)
@@ -199,25 +238,32 @@ def run_epoch(
         preds.append(pred.detach().cpu().numpy())
         targets.append(target.detach().cpu().numpy())
 
-    pred_arr = np.concatenate(preds)
-    target_arr = np.concatenate(targets)
-    return float(np.mean(losses)), pred_arr, target_arr
+    return (
+        float(np.mean(losses)),
+        np.concatenate(preds),
+        np.concatenate(targets),
+    )
+
+
+def inverse_target_scale(pred_scaled: np.ndarray, target_mean: float, target_std: float) -> np.ndarray:
+    return pred_scaled * target_std + target_mean
 
 
 def main() -> None:
     args = parse_args()
-    if args.book_weight < 0 or args.trade_weight < 0:
-        raise ValueError("book_weight and trade_weight must be non-negative.")
-    if args.book_weight == 0 and args.trade_weight == 0:
-        raise ValueError("book_weight and trade_weight cannot both be zero.")
+    if args.mode == "dual":
+        if args.book_weight < 0 or args.trade_weight < 0:
+            raise ValueError("book_weight and trade_weight must be non-negative.")
+        if args.book_weight == 0 and args.trade_weight == 0:
+            raise ValueError("book_weight and trade_weight cannot both be zero.")
 
     tensor_dir = Path(args.tensor_dir)
     output_dir = Path(args.output_dir) if args.output_dir else tensor_dir / "cnn_models"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    book_tensor = np.load(tensor_dir / "book_tensor.npy")
-    trade_tensor = np.load(tensor_dir / "trade_tensor.npy")
-    target = np.load(tensor_dir / "target.npy")
+    book_tensor = np.load(tensor_dir / "book_tensor.npy").astype(np.float32)
+    trade_tensor = np.load(tensor_dir / "trade_tensor.npy").astype(np.float32)
+    target = np.load(tensor_dir / "target.npy").astype(np.float32)
     stock_id = np.load(tensor_dir / "stock_id.npy")
     time_id = np.load(tensor_dir / "time_id.npy")
 
@@ -230,27 +276,46 @@ def main() -> None:
 
     split_index = max(1, int(len(target) * (1 - args.valid_ratio)))
 
-    train_dataset = OptiverTensorDataset(
-        book_tensor[:split_index],
-        trade_tensor[:split_index],
-        target[:split_index],
+    book_train_raw = book_tensor[:split_index]
+    book_valid_raw = book_tensor[split_index:]
+    trade_train_raw = trade_tensor[:split_index]
+    trade_valid_raw = trade_tensor[split_index:]
+    y_train = target[:split_index]
+    y_valid = target[split_index:]
+
+    book_train, book_valid, book_mean, book_std = standardize_tensor(
+        book_train_raw, book_valid_raw
     )
-    valid_dataset = OptiverTensorDataset(
-        book_tensor[split_index:],
-        trade_tensor[split_index:],
-        target[split_index:],
+    trade_train, trade_valid, trade_mean, trade_std = standardize_tensor(
+        trade_train_raw, trade_valid_raw
     )
 
+    target_mean = float(y_train.mean())
+    target_std = float(y_train.std())
+    if target_std < 1e-8:
+        target_std = 1.0
+    y_train_scaled = (y_train - target_mean) / target_std
+    y_valid_scaled = (y_valid - target_mean) / target_std
+
+    train_dataset = OptiverTensorDataset(book_train, trade_train, y_train_scaled)
+    valid_dataset = OptiverTensorDataset(book_valid, trade_valid, y_valid_scaled)
+
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    train_eval_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False)
     valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False)
 
     weight_sum = args.book_weight + args.trade_weight
+    book_weight = args.book_weight / weight_sum if weight_sum > 0 else 1.0
+    trade_weight = args.trade_weight / weight_sum if weight_sum > 0 else 0.0
+
     model = DualBranchCNN(
+        mode=args.mode,
         book_channels=book_tensor.shape[1],
         trade_channels=trade_tensor.shape[1],
         hidden_dim=args.hidden_dim,
-        book_weight=args.book_weight / weight_sum,
-        trade_weight=args.trade_weight / weight_sum,
+        dropout=args.dropout,
+        book_weight=book_weight,
+        trade_weight=trade_weight,
     ).to(args.device)
 
     optimizer = torch.optim.Adam(
@@ -264,33 +329,45 @@ def main() -> None:
     best_train_pred = None
 
     for _ in range(args.epochs):
-        _, train_pred, train_target = run_epoch(
+        _, _, _ = run_epoch(
             model=model,
             loader=train_loader,
             optimizer=optimizer,
             device=args.device,
         )
-        _, valid_pred, valid_target = run_epoch(
+        _, train_pred_scaled, _ = run_epoch(
+            model=model,
+            loader=train_eval_loader,
+            optimizer=None,
+            device=args.device,
+        )
+        _, valid_pred_scaled, _ = run_epoch(
             model=model,
             loader=valid_loader,
             optimizer=None,
             device=args.device,
         )
 
-        valid_rmse = np.sqrt(mean_squared_error(valid_target, valid_pred))
+        train_pred = inverse_target_scale(train_pred_scaled, target_mean, target_std)
+        valid_pred = inverse_target_scale(valid_pred_scaled, target_mean, target_std)
+        train_pred = np.clip(train_pred, 0.0, None)
+        valid_pred = np.clip(valid_pred, 0.0, None)
+
+        valid_rmse = np.sqrt(mean_squared_error(y_valid, valid_pred))
         if valid_rmse < best_valid_rmse:
             best_valid_rmse = valid_rmse
             best_valid_pred = valid_pred.copy()
             best_train_pred = train_pred.copy()
 
-    train_metrics = evaluate_predictions(target[:split_index], best_train_pred)
-    valid_metrics = evaluate_predictions(target[split_index:], best_valid_pred)
+    train_metrics = evaluate_predictions(y_train, best_train_pred)
+    valid_metrics = evaluate_predictions(y_valid, best_valid_pred)
 
     metrics = {
         "train": train_metrics,
         "valid": valid_metrics,
         "metadata": {
             "tensor_dir": str(tensor_dir),
+            "mode": args.mode,
             "train_rows": int(split_index),
             "valid_rows": int(len(target) - split_index),
             "valid_ratio": args.valid_ratio,
@@ -299,30 +376,36 @@ def main() -> None:
             "learning_rate": args.learning_rate,
             "weight_decay": args.weight_decay,
             "hidden_dim": args.hidden_dim,
-            "book_weight": args.book_weight / weight_sum,
-            "trade_weight": args.trade_weight / weight_sum,
+            "dropout": args.dropout,
+            "book_weight": book_weight,
+            "trade_weight": trade_weight,
             "device": args.device,
             "book_channels": int(book_tensor.shape[1]),
             "trade_channels": int(trade_tensor.shape[1]),
             "sequence_length": int(book_tensor.shape[2]),
+            "target_mean": target_mean,
+            "target_std": target_std,
+            "book_channel_mean": book_mean.tolist(),
+            "book_channel_std": book_std.tolist(),
+            "trade_channel_mean": trade_mean.tolist(),
+            "trade_channel_std": trade_std.tolist(),
         },
     }
 
-    metrics_path = output_dir / "dual_cnn_metrics.json"
-    pred_path = output_dir / "dual_cnn_valid_predictions.csv"
+    metrics_path = output_dir / f"{args.mode}_cnn_metrics.json"
+    pred_path = output_dir / f"{args.mode}_cnn_valid_predictions.csv"
 
     with metrics_path.open("w", encoding="utf-8") as f:
         json.dump(metrics, f, ensure_ascii=False, indent=2)
 
-    pred_df = {
-        "stock_id": stock_id[split_index:],
-        "time_id": time_id[split_index:],
-        "target": target[split_index:],
-        "prediction": best_valid_pred,
-    }
-    import pandas as pd
-
-    pd.DataFrame(pred_df).to_csv(pred_path, index=False)
+    pd.DataFrame(
+        {
+            "stock_id": stock_id[split_index:],
+            "time_id": time_id[split_index:],
+            "target": y_valid,
+            "prediction": best_valid_pred,
+        }
+    ).to_csv(pred_path, index=False)
 
     print(json.dumps(metrics, ensure_ascii=False, indent=2))
     print(f"Metrics saved to: {metrics_path}")

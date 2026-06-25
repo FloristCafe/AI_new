@@ -1,0 +1,4 @@
+﻿source: Kaggle competition Optiver Realized Volatility Prediction
+original_zip: C:\Users\lenovo\Downloads\optiver-realized-volatility-prediction.zip
+stored_zip: D:\Python\Datasets\optiver_realized_volatility_prediction\raw_zip\optiver-realized-volatility-prediction.zip
+extracted_to: D:\Python\Datasets\optiver_realized_volatility_prediction\raw_extracted
