@@ -393,10 +393,20 @@ def main() -> None:
     }
 
     metrics_path = output_dir / f"{args.mode}_cnn_metrics.json"
+    train_pred_path = output_dir / f"{args.mode}_cnn_train_predictions.csv"
     pred_path = output_dir / f"{args.mode}_cnn_valid_predictions.csv"
 
     with metrics_path.open("w", encoding="utf-8") as f:
         json.dump(metrics, f, ensure_ascii=False, indent=2)
+
+    pd.DataFrame(
+        {
+            "stock_id": stock_id[:split_index],
+            "time_id": time_id[:split_index],
+            "target": y_train,
+            "prediction": best_train_pred,
+        }
+    ).to_csv(train_pred_path, index=False)
 
     pd.DataFrame(
         {
@@ -409,6 +419,7 @@ def main() -> None:
 
     print(json.dumps(metrics, ensure_ascii=False, indent=2))
     print(f"Metrics saved to: {metrics_path}")
+    print(f"Train predictions saved to: {train_pred_path}")
     print(f"Validation predictions saved to: {pred_path}")
 
 

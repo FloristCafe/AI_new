@@ -411,7 +411,20 @@ def main() -> None:
         metrics["component_metrics"] = component_metrics
 
     metrics_path = output_dir / f"{args.model}_metrics.json"
+    train_pred_path = output_dir / f"{args.model}_train_predictions.csv"
     pred_path = output_dir / f"{args.model}_valid_predictions.csv"
+
+    train_pred_df = pd.DataFrame(
+        {
+            "stock_id": train_df["stock_id"],
+            "time_id": train_df["time_id"],
+            "target": y_train,
+            "prediction": train_pred,
+        }
+    )
+    if args.model == "mlp_lightgbm_ensemble":
+        train_pred_df["prediction_lightgbm"] = lgbm_train_pred
+        train_pred_df["prediction_mlp"] = mlp_train_pred
 
     valid_pred_df = pd.DataFrame(
         {
@@ -428,10 +441,12 @@ def main() -> None:
     with metrics_path.open("w", encoding="utf-8") as f:
         json.dump(metrics, f, ensure_ascii=False, indent=2)
 
+    train_pred_df.to_csv(train_pred_path, index=False)
     valid_pred_df.to_csv(pred_path, index=False)
 
     print(json.dumps(metrics, ensure_ascii=False, indent=2))
     print(f"Metrics saved to: {metrics_path}")
+    print(f"Train predictions saved to: {train_pred_path}")
     print(f"Validation predictions saved to: {pred_path}")
 
 

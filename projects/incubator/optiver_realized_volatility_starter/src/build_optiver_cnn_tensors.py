@@ -82,13 +82,60 @@ def build_book_tensor(
 
 def build_trade_tensor(
     trade_df: pd.DataFrame,
+    book_df: pd.DataFrame,
     sample_keys: pd.DataFrame,
     sequence_length: int,
 ) -> tuple[np.ndarray, list[str]]:
+    book_context = book_df.copy()
+    book_context["mid_price1"] = (book_context["ask_price1"] + book_context["bid_price1"]) / 2.0
+    book_context["spread1"] = book_context["ask_price1"] - book_context["bid_price1"]
+    book_context["total_volume1"] = book_context["ask_size1"] + book_context["bid_size1"]
+    book_context["size_imbalance1"] = (
+        (book_context["bid_size1"] - book_context["ask_size1"])
+        / (book_context["bid_size1"] + book_context["ask_size1"]).replace(0, np.nan)
+    )
+    book_context = (
+        book_context.sort_values(["stock_id", "time_id", "seconds_in_bucket"])
+        .groupby(["stock_id", "time_id", "seconds_in_bucket"])
+        .tail(1)[
+            [
+                "stock_id",
+                "time_id",
+                "seconds_in_bucket",
+                "mid_price1",
+                "spread1",
+                "total_volume1",
+                "size_imbalance1",
+            ]
+        ]
+        .reset_index(drop=True)
+    )
+
+    df = trade_df.copy()
+    df = df.sort_values(["stock_id", "time_id", "seconds_in_bucket"]).reset_index(drop=True)
+    df["log_price"] = np.log(df["price"])
+    df["trade_return"] = (
+        df.groupby(["stock_id", "time_id"])["log_price"].transform(lambda s: s.diff())
+    )
+    df["size_per_order"] = df["size"] / df["order_count"].replace(0, np.nan)
+    df = df.merge(
+        book_context,
+        on=["stock_id", "time_id", "seconds_in_bucket"],
+        how="left",
+    )
+    df["trade_mid_gap"] = df["price"] - df["mid_price1"]
+    df["trade_depth_ratio"] = df["size"] / df["total_volume1"].replace(0, np.nan)
+    df["trade_impact"] = df["trade_return"].abs() * df["size"]
+
     trade_cols = [
-        "price",
+        "trade_return",
         "size",
         "order_count",
+        "size_per_order",
+        "trade_mid_gap",
+        "trade_depth_ratio",
+        "trade_impact",
+        "size_imbalance1",
     ]
     tensor = np.zeros((len(sample_keys), len(trade_cols), sequence_length), dtype=np.float32)
 
@@ -98,7 +145,7 @@ def build_trade_tensor(
     }
 
     aggregated = (
-        trade_df.groupby(["stock_id", "time_id", "seconds_in_bucket"])[trade_cols]
+        df.groupby(["stock_id", "time_id", "seconds_in_bucket"])[trade_cols]
         .mean()
         .reset_index()
     )
@@ -111,7 +158,7 @@ def build_trade_tensor(
         )
         group = group.loc[valid_mask]
         sec_idx = group["seconds_in_bucket"].to_numpy(dtype=int)
-        aligned = group[trade_cols].to_numpy(dtype=np.float32)
+        aligned = group[trade_cols].fillna(0.0).to_numpy(dtype=np.float32)
         tensor[row_idx][:, sec_idx] = aligned.T
 
     return tensor, trade_cols
@@ -135,6 +182,7 @@ def main() -> None:
     )
     trade_tensor, trade_cols = build_trade_tensor(
         trade_df=trade_df,
+        book_df=book_df,
         sample_keys=sample_keys,
         sequence_length=args.sequence_length,
     )
