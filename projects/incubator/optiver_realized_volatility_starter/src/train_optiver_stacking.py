@@ -28,6 +28,9 @@ from train_optiver_dual_cnn import (
 DEFAULT_FEATURE_TABLE = Path(
     r"D:\Python\Datasets\optiver_realized_volatility_prediction\samples\optiver_sandbox_stocks_0-1-2-3-4-5-6-7-8-9-10-11-13-14-15-16-17-18-19-20-21-22-23-24_times_200\features_knn\optiver_features_knn.parquet"
 )
+DEFAULT_MLP_FEATURE_TABLE = Path(
+    r"D:\Python\Datasets\optiver_realized_volatility_prediction\samples\optiver_sandbox_stocks_0-1-2-3-4-5-6-7-8-9-10-11-13-14-15-16-17-18-19-20-21-22-23-24_times_200\features_mlp_view_lite\optiver_features_mlp_view_lite.parquet"
+)
 DEFAULT_TENSOR_DIR = Path(
     r"D:\Python\Datasets\optiver_realized_volatility_prediction\samples\optiver_sandbox_stocks_0-1-2-3-4-5-6-7-8-9-10-11-13-14-15-16-17-18-19-20-21-22-23-24_times_200\cnn_tensors"
 )
@@ -44,7 +47,13 @@ def parse_args() -> argparse.Namespace:
         "--feature-table",
         type=str,
         default=str(DEFAULT_FEATURE_TABLE),
-        help="Path to the Optiver feature parquet used by tabular models.",
+        help="Path to the Optiver feature parquet used by LightGBM.",
+    )
+    parser.add_argument(
+        "--mlp-feature-table",
+        type=str,
+        default=str(DEFAULT_MLP_FEATURE_TABLE),
+        help="Path to the Optiver feature parquet used by MLP.",
     )
     parser.add_argument(
         "--tensor-dir",
@@ -288,6 +297,37 @@ def load_multimodal_dataset(
     return merged, aligned_book, aligned_trade
 
 
+def load_feature_frame(feature_table_path: Path) -> pd.DataFrame:
+    df = pd.read_parquet(feature_table_path).copy()
+    df = df.sort_values(["stock_id", "time_id"]).reset_index(drop=True)
+    return df
+
+
+def align_secondary_feature_frame(
+    base_df: pd.DataFrame,
+    secondary_df: pd.DataFrame,
+    feature_table_name: str,
+) -> pd.DataFrame:
+    keep_cols = [c for c in secondary_df.columns if c not in {"target"}]
+    merged = base_df[["stock_id", "time_id", "target"]].merge(
+        secondary_df[keep_cols],
+        on=["stock_id", "time_id"],
+        how="inner",
+        validate="one_to_one",
+    )
+    if len(merged) != len(base_df):
+        raise ValueError(
+            f"{feature_table_name} does not align one-to-one with the base feature table."
+        )
+    if not np.allclose(
+        merged["target"].to_numpy(dtype=np.float32),
+        base_df["target"].to_numpy(dtype=np.float32),
+        atol=1e-8,
+    ):
+        raise ValueError(f"Target mismatch detected after aligning {feature_table_name}.")
+    return merged.sort_values(["time_id", "stock_id"]).reset_index(drop=True)
+
+
 def split_outer_train_valid(
     df: pd.DataFrame,
     book_tensor: np.ndarray,
@@ -314,6 +354,16 @@ def split_outer_train_valid(
     trade_train = trade_tensor[train_mask]
     trade_valid = trade_tensor[valid_mask]
     return train_df, valid_df, book_train, book_valid, trade_train, trade_valid
+
+
+def split_feature_frame_by_time_ids(
+    df: pd.DataFrame,
+    train_time_ids: set[int],
+    valid_time_ids: set[int],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    train_df = df.loc[df["time_id"].isin(train_time_ids)].reset_index(drop=True)
+    valid_df = df.loc[df["time_id"].isin(valid_time_ids)].reset_index(drop=True)
+    return train_df, valid_df
 
 
 def train_bagged_predict(
@@ -567,6 +617,7 @@ def build_meta_model(args: argparse.Namespace):
 def main() -> None:
     args = parse_args()
     feature_table_path = Path(args.feature_table)
+    mlp_feature_table_path = Path(args.mlp_feature_table)
     tensor_dir = Path(args.tensor_dir)
     output_dir = (
         Path(args.output_dir)
@@ -575,20 +626,43 @@ def main() -> None:
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    df, book_tensor, trade_tensor = load_multimodal_dataset(feature_table_path, tensor_dir)
+    lgbm_df, book_tensor, trade_tensor = load_multimodal_dataset(feature_table_path, tensor_dir)
+    mlp_raw_df = load_feature_frame(mlp_feature_table_path)
+    mlp_df = align_secondary_feature_frame(
+        base_df=lgbm_df,
+        secondary_df=mlp_raw_df,
+        feature_table_name="mlp_feature_table",
+    )
+
     train_df, valid_df, book_train, book_valid, trade_train, trade_valid = split_outer_train_valid(
-        df,
+        lgbm_df,
         book_tensor,
         trade_tensor,
         args.valid_ratio,
     )
 
-    feature_cols = [c for c in train_df.columns if c not in {"stock_id", "time_id", "target"}]
-    X_train = train_df[feature_cols].reset_index(drop=True)
+    unique_time_ids = np.array(sorted(lgbm_df["time_id"].unique()))
+    split_index = max(1, int(len(unique_time_ids) * (1 - args.valid_ratio)))
+    split_index = min(split_index, len(unique_time_ids) - 1)
+    train_time_ids = set(unique_time_ids[:split_index].tolist())
+    valid_time_ids = set(unique_time_ids[split_index:].tolist())
+
+    mlp_train_df, mlp_valid_df = split_feature_frame_by_time_ids(
+        mlp_df,
+        train_time_ids=train_time_ids,
+        valid_time_ids=valid_time_ids,
+    )
+
+    lgbm_feature_cols = [c for c in train_df.columns if c not in {"stock_id", "time_id", "target"}]
+    mlp_feature_cols = [c for c in mlp_train_df.columns if c not in {"stock_id", "time_id", "target"}]
+
+    X_train_lgbm = train_df[lgbm_feature_cols].reset_index(drop=True)
     y_train = train_df["target"].to_numpy(dtype=np.float32)
     groups_train = train_df["time_id"].to_numpy()
 
-    X_valid = valid_df[feature_cols].reset_index(drop=True)
+    X_valid_lgbm = valid_df[lgbm_feature_cols].reset_index(drop=True)
+    X_train_mlp = mlp_train_df[mlp_feature_cols].reset_index(drop=True)
+    X_valid_mlp = mlp_valid_df[mlp_feature_cols].reset_index(drop=True)
     y_valid = valid_df["target"].to_numpy(dtype=np.float32)
 
     unique_groups = np.unique(groups_train)
@@ -604,24 +678,26 @@ def main() -> None:
     oof_pred_mlp = np.zeros(len(train_df), dtype=np.float32)
     oof_pred_cnn = np.zeros(len(train_df), dtype=np.float32)
 
-    for fold_idx, (fit_idx, holdout_idx) in enumerate(gkf.split(X_train, y_train, groups_train), start=1):
-        X_fit = X_train.iloc[fit_idx].reset_index(drop=True)
+    for fold_idx, (fit_idx, holdout_idx) in enumerate(gkf.split(X_train_lgbm, y_train, groups_train), start=1):
+        X_fit_lgbm = X_train_lgbm.iloc[fit_idx].reset_index(drop=True)
+        X_holdout_lgbm = X_train_lgbm.iloc[holdout_idx].reset_index(drop=True)
+        X_fit_mlp = X_train_mlp.iloc[fit_idx].reset_index(drop=True)
+        X_holdout_mlp = X_train_mlp.iloc[holdout_idx].reset_index(drop=True)
         y_fit_series = pd.Series(y_train[fit_idx])
-        X_holdout = X_train.iloc[holdout_idx].reset_index(drop=True)
 
         oof_pred_lightgbm[holdout_idx] = train_bagged_predict(
             model_name="lightgbm",
             args=args,
-            X_train=X_fit,
+            X_train=X_fit_lgbm,
             y_train=y_fit_series,
-            X_predict=X_holdout,
+            X_predict=X_holdout_lgbm,
         )
         oof_pred_mlp[holdout_idx] = train_bagged_predict(
             model_name="mlp",
             args=args,
-            X_train=X_fit,
+            X_train=X_fit_mlp,
             y_train=y_fit_series,
-            X_predict=X_holdout,
+            X_predict=X_holdout_mlp,
         )
         oof_pred_cnn[holdout_idx] = train_cnn_predict(
             args=args,
@@ -637,16 +713,16 @@ def main() -> None:
     valid_pred_lightgbm = train_bagged_predict(
         model_name="lightgbm",
         args=args,
-        X_train=X_train,
+        X_train=X_train_lgbm,
         y_train=pd.Series(y_train),
-        X_predict=X_valid,
+        X_predict=X_valid_lgbm,
     )
     valid_pred_mlp = train_bagged_predict(
         model_name="mlp",
         args=args,
-        X_train=X_train,
+        X_train=X_train_mlp,
         y_train=pd.Series(y_train),
-        X_predict=X_valid,
+        X_predict=X_valid_mlp,
     )
     valid_pred_cnn = train_cnn_predict(
         args=args,
@@ -691,9 +767,12 @@ def main() -> None:
         },
         "metadata": {
             "feature_table_path": str(feature_table_path),
+            "mlp_feature_table_path": str(mlp_feature_table_path),
             "tensor_dir": str(tensor_dir),
-            "feature_count": len(feature_cols),
-            "feature_columns": feature_cols,
+            "lightgbm_feature_count": len(lgbm_feature_cols),
+            "lightgbm_feature_columns": lgbm_feature_cols,
+            "mlp_feature_count": len(mlp_feature_cols),
+            "mlp_feature_columns": mlp_feature_cols,
             "train_rows": int(len(train_df)),
             "valid_rows": int(len(valid_df)),
             "valid_ratio": args.valid_ratio,
