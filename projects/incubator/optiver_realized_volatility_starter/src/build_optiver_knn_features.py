@@ -7,6 +7,8 @@ import pandas as pd
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 
+from optiver_memory_utils import optimize_tabular_frame
+
 
 DEFAULT_FEATURE_TABLE = Path(
     r"D:\Python\Datasets\optiver_realized_volatility_prediction\samples\optiver_sandbox_stocks_0-1-2-3-4-5-6-7_times_80\features_v2\optiver_features_v2.parquet"
@@ -150,6 +152,7 @@ def main() -> None:
 
     feature_table_out = output_dir / "optiver_features_knn.parquet"
     summary_out = output_dir / "summary.json"
+    df = optimize_tabular_frame(df)
     df.to_parquet(feature_table_out, index=False)
 
     summary = {

@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from optiver_memory_utils import optimize_tabular_frame
+
 
 DEFAULT_SAMPLE_DIR = Path(
     r"D:\Python\Datasets\optiver_realized_volatility_prediction\samples\optiver_sandbox_stocks_0-1-2_times_20"
@@ -257,6 +259,7 @@ def main() -> None:
 
     feature_df = train_df.merge(book_features, on=["stock_id", "time_id"], how="left")
     feature_df = feature_df.merge(trade_features, on=["stock_id", "time_id"], how="left")
+    feature_df = optimize_tabular_frame(feature_df)
 
     feature_table_path = output_dir / "optiver_features_v2.parquet"
     summary_path = output_dir / "summary.json"

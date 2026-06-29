@@ -134,9 +134,9 @@ class OptiverTensorDataset(Dataset):
         trade_tensor: np.ndarray,
         target_scaled: np.ndarray,
     ) -> None:
-        self.book_tensor = torch.tensor(book_tensor, dtype=torch.float32)
-        self.trade_tensor = torch.tensor(trade_tensor, dtype=torch.float32)
-        self.target = torch.tensor(target_scaled, dtype=torch.float32)
+        self.book_tensor = torch.from_numpy(np.asarray(book_tensor, dtype=np.float32))
+        self.trade_tensor = torch.from_numpy(np.asarray(trade_tensor, dtype=np.float32))
+        self.target = torch.from_numpy(np.asarray(target_scaled, dtype=np.float32))
 
     def __len__(self) -> int:
         return len(self.target)

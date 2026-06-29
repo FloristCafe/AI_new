@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from optiver_memory_utils import optimize_tabular_frame
+
 
 DEFAULT_FEATURE_TABLE = Path(
     r"D:\Python\Datasets\optiver_realized_volatility_prediction\samples\optiver_sandbox_stocks_0-1-2-3-4-5-6-7-8-9-10-11-13-14-15-16-17-18-19-20-21-22-23-24_times_200\features_knn\optiver_features_knn.parquet"
@@ -416,6 +418,7 @@ def main() -> None:
     final_raw_cols = intersect_columns(df, raw_core_cols)
     final_cols = ["stock_id", "time_id", "target", *final_raw_cols, *added_columns]
     feature_df = df[final_cols].copy()
+    feature_df = optimize_tabular_frame(feature_df)
 
     feature_table_out = output_dir / "optiver_features_mlp_view_plus.parquet"
     summary_out = output_dir / "summary.json"

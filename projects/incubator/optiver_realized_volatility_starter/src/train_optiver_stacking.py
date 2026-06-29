@@ -1,5 +1,4 @@
 import argparse
-import copy
 import json
 from pathlib import Path
 
@@ -15,7 +14,7 @@ from sklearn.preprocessing import StandardScaler
 from torch import nn
 from torch.utils.data import DataLoader
 
-from train_optiver_baseline import build_model, make_bootstrap_sample
+from train_optiver_baseline import build_model
 from train_optiver_dual_cnn import (
     DualBranchCNN,
     OptiverTensorDataset,
@@ -23,6 +22,7 @@ from train_optiver_dual_cnn import (
     run_epoch,
     standardize_tensor,
 )
+from optiver_memory_utils import optimize_tabular_frame
 
 
 DEFAULT_FEATURE_TABLE = Path(
@@ -245,12 +245,13 @@ def load_multimodal_dataset(
     feature_table_path: Path,
     tensor_dir: Path,
 ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
-    feature_df = pd.read_parquet(feature_table_path).copy()
+    feature_df = pd.read_parquet(feature_table_path)
+    feature_df = optimize_tabular_frame(feature_df)
     feature_df = feature_df.sort_values(["stock_id", "time_id"]).reset_index(drop=True)
 
-    book_tensor = np.load(tensor_dir / "book_tensor.npy").astype(np.float32)
-    trade_tensor = np.load(tensor_dir / "trade_tensor.npy").astype(np.float32)
-    tensor_target = np.load(tensor_dir / "target.npy").astype(np.float32)
+    book_tensor = np.load(tensor_dir / "book_tensor.npy", mmap_mode="r").astype(np.float32)
+    trade_tensor = np.load(tensor_dir / "trade_tensor.npy", mmap_mode="r").astype(np.float32)
+    tensor_target = np.load(tensor_dir / "target.npy", mmap_mode="r").astype(np.float32)
     tensor_stock_id = np.load(tensor_dir / "stock_id.npy")
     tensor_time_id = np.load(tensor_dir / "time_id.npy")
 
@@ -298,7 +299,8 @@ def load_multimodal_dataset(
 
 
 def load_feature_frame(feature_table_path: Path) -> pd.DataFrame:
-    df = pd.read_parquet(feature_table_path).copy()
+    df = pd.read_parquet(feature_table_path)
+    df = optimize_tabular_frame(df)
     df = df.sort_values(["stock_id", "time_id"]).reset_index(drop=True)
     return df
 
@@ -366,12 +368,22 @@ def split_feature_frame_by_time_ids(
     return train_df, valid_df
 
 
+def make_bootstrap_sample_array(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    sample_idx = rng.integers(0, len(X_train), size=len(X_train))
+    return X_train[sample_idx], y_train[sample_idx]
+
+
 def train_bagged_predict(
     model_name: str,
     args: argparse.Namespace,
-    X_train: pd.DataFrame,
-    y_train: pd.Series,
-    X_predict: pd.DataFrame,
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_predict: np.ndarray,
 ) -> np.ndarray:
     if args.bagging_size <= 1:
         model = build_model(model_name, args)
@@ -383,10 +395,9 @@ def train_bagged_predict(
 
     preds: list[np.ndarray] = []
     for bag_idx in range(args.bagging_size):
-        bag_args = copy.deepcopy(args)
         seed = 42 + bag_idx
-        X_boot, y_boot = make_bootstrap_sample(X_train, y_train, seed)
-        model = build_model(model_name, bag_args)
+        X_boot, y_boot = make_bootstrap_sample_array(X_train, y_train, seed)
+        model = build_model(model_name, args)
         model.fit(X_boot, y_boot)
         bag_pred = model.predict(X_predict)
         if model_name == "mlp":
@@ -647,22 +658,19 @@ def main() -> None:
     train_time_ids = set(unique_time_ids[:split_index].tolist())
     valid_time_ids = set(unique_time_ids[split_index:].tolist())
 
-    mlp_train_df, mlp_valid_df = split_feature_frame_by_time_ids(
-        mlp_df,
-        train_time_ids=train_time_ids,
-        valid_time_ids=valid_time_ids,
-    )
+    mlp_train_mask = mlp_df["time_id"].isin(train_time_ids).to_numpy()
+    mlp_valid_mask = mlp_df["time_id"].isin(valid_time_ids).to_numpy()
 
     lgbm_feature_cols = [c for c in train_df.columns if c not in {"stock_id", "time_id", "target"}]
-    mlp_feature_cols = [c for c in mlp_train_df.columns if c not in {"stock_id", "time_id", "target"}]
+    mlp_feature_cols = [c for c in mlp_df.columns if c not in {"stock_id", "time_id", "target"}]
 
-    X_train_lgbm = train_df[lgbm_feature_cols].reset_index(drop=True)
+    X_train_lgbm = train_df[lgbm_feature_cols].to_numpy(dtype=np.float32, copy=False)
     y_train = train_df["target"].to_numpy(dtype=np.float32)
     groups_train = train_df["time_id"].to_numpy()
 
-    X_valid_lgbm = valid_df[lgbm_feature_cols].reset_index(drop=True)
-    X_train_mlp = mlp_train_df[mlp_feature_cols].reset_index(drop=True)
-    X_valid_mlp = mlp_valid_df[mlp_feature_cols].reset_index(drop=True)
+    X_valid_lgbm = valid_df[lgbm_feature_cols].to_numpy(dtype=np.float32, copy=False)
+    X_train_mlp = mlp_df.loc[mlp_train_mask, mlp_feature_cols].to_numpy(dtype=np.float32, copy=False)
+    X_valid_mlp = mlp_df.loc[mlp_valid_mask, mlp_feature_cols].to_numpy(dtype=np.float32, copy=False)
     y_valid = valid_df["target"].to_numpy(dtype=np.float32)
 
     unique_groups = np.unique(groups_train)
@@ -678,25 +686,27 @@ def main() -> None:
     oof_pred_mlp = np.zeros(len(train_df), dtype=np.float32)
     oof_pred_cnn = np.zeros(len(train_df), dtype=np.float32)
 
-    for fold_idx, (fit_idx, holdout_idx) in enumerate(gkf.split(X_train_lgbm, y_train, groups_train), start=1):
-        X_fit_lgbm = X_train_lgbm.iloc[fit_idx].reset_index(drop=True)
-        X_holdout_lgbm = X_train_lgbm.iloc[holdout_idx].reset_index(drop=True)
-        X_fit_mlp = X_train_mlp.iloc[fit_idx].reset_index(drop=True)
-        X_holdout_mlp = X_train_mlp.iloc[holdout_idx].reset_index(drop=True)
-        y_fit_series = pd.Series(y_train[fit_idx])
+    for fold_idx, (fit_idx, holdout_idx) in enumerate(
+        gkf.split(X_train_lgbm, y_train, groups_train), start=1
+    ):
+        X_fit_lgbm = X_train_lgbm[fit_idx]
+        X_holdout_lgbm = X_train_lgbm[holdout_idx]
+        X_fit_mlp = X_train_mlp[fit_idx]
+        X_holdout_mlp = X_train_mlp[holdout_idx]
+        y_fit = y_train[fit_idx]
 
         oof_pred_lightgbm[holdout_idx] = train_bagged_predict(
             model_name="lightgbm",
             args=args,
             X_train=X_fit_lgbm,
-            y_train=y_fit_series,
+            y_train=y_fit,
             X_predict=X_holdout_lgbm,
         )
         oof_pred_mlp[holdout_idx] = train_bagged_predict(
             model_name="mlp",
             args=args,
             X_train=X_fit_mlp,
-            y_train=y_fit_series,
+            y_train=y_fit,
             X_predict=X_holdout_mlp,
         )
         oof_pred_cnn[holdout_idx] = train_cnn_predict(
@@ -714,14 +724,14 @@ def main() -> None:
         model_name="lightgbm",
         args=args,
         X_train=X_train_lgbm,
-        y_train=pd.Series(y_train),
+        y_train=y_train,
         X_predict=X_valid_lgbm,
     )
     valid_pred_mlp = train_bagged_predict(
         model_name="mlp",
         args=args,
         X_train=X_train_mlp,
-        y_train=pd.Series(y_train),
+        y_train=y_train,
         X_predict=X_valid_mlp,
     )
     valid_pred_cnn = train_cnn_predict(

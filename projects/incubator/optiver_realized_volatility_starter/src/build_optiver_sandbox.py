@@ -15,6 +15,19 @@ def parse_int_list(value: str | None) -> list[int] | None:
     return [int(x.strip()) for x in value.split(",") if x.strip()]
 
 
+def format_stock_tag(stock_ids: list[int]) -> str:
+    if not stock_ids:
+        raise ValueError("stock_ids cannot be empty when building the output tag.")
+
+    sorted_ids = sorted(stock_ids)
+    is_contiguous = all(
+        right - left == 1 for left, right in zip(sorted_ids[:-1], sorted_ids[1:])
+    )
+    if is_contiguous:
+        return f"{sorted_ids[0]}-{sorted_ids[-1]}"
+    return "-".join(str(x) for x in sorted_ids)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build a small Optiver train/book/trade sandbox sample."
@@ -104,7 +117,7 @@ def build_output_dir(
     if explicit_output_dir:
         output_dir = Path(explicit_output_dir)
     else:
-        stock_tag = "-".join(str(x) for x in stock_ids)
+        stock_tag = format_stock_tag(stock_ids)
         output_dir = SAMPLE_ROOT / f"optiver_sandbox_stocks_{stock_tag}_times_{time_ids_per_stock}"
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir

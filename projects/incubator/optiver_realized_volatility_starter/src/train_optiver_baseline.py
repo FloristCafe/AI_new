@@ -14,6 +14,8 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from optiver_memory_utils import optimize_tabular_frame
+
 
 DEFAULT_FEATURE_TABLE = Path(
     r"D:\Python\Datasets\optiver_realized_volatility_prediction\samples\optiver_sandbox_stocks_0-1-2_times_20\features_baseline\optiver_baseline_features.parquet"
@@ -48,6 +50,16 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.2,
         help="Validation ratio using chronological order inside the feature table.",
+    )
+    parser.add_argument(
+        "--split-mode",
+        type=str,
+        default="time_id",
+        choices=["time_id", "row"],
+        help=(
+            "Validation split protocol. 'time_id' keeps whole time groups isolated and "
+            "matches the stacking outer split more closely; 'row' preserves the old behavior."
+        ),
     )
     parser.add_argument(
         "--lgbm-num-leaves",
@@ -289,6 +301,33 @@ def train_bagged_model(
     return np.mean(train_preds, axis=0), np.mean(valid_preds, axis=0)
 
 
+def split_train_valid(
+    df: pd.DataFrame,
+    valid_ratio: float,
+    split_mode: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if split_mode == "row":
+        split_index = max(1, int(len(df) * (1 - valid_ratio)))
+        split_index = min(split_index, len(df) - 1)
+        train_df = df.iloc[:split_index].copy()
+        valid_df = df.iloc[split_index:].copy()
+        return train_df, valid_df
+
+    unique_time_ids = np.array(sorted(df["time_id"].unique()))
+    if len(unique_time_ids) < 2:
+        raise ValueError("Need at least two unique time_id groups to create train/valid split.")
+
+    split_index = max(1, int(len(unique_time_ids) * (1 - valid_ratio)))
+    split_index = min(split_index, len(unique_time_ids) - 1)
+
+    train_time_ids = set(unique_time_ids[:split_index].tolist())
+    valid_time_ids = set(unique_time_ids[split_index:].tolist())
+
+    train_df = df.loc[df["time_id"].isin(train_time_ids)].copy()
+    valid_df = df.loc[df["time_id"].isin(valid_time_ids)].copy()
+    return train_df, valid_df
+
+
 def train_bagged_component(
     model_name: str,
     args: argparse.Namespace,
@@ -317,15 +356,18 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_parquet(feature_table_path)
+    df = optimize_tabular_frame(df)
     df = df.sort_values(["stock_id", "time_id"]).reset_index(drop=True)
 
     feature_cols = [c for c in df.columns if c not in {"stock_id", "time_id", "target"}]
     X = df[feature_cols]
     y = df["target"]
 
-    split_index = max(1, int(len(df) * (1 - args.valid_ratio)))
-    train_df = df.iloc[:split_index].copy()
-    valid_df = df.iloc[split_index:].copy()
+    train_df, valid_df = split_train_valid(
+        df=df,
+        valid_ratio=args.valid_ratio,
+        split_mode=args.split_mode,
+    )
 
     X_train = train_df[feature_cols]
     y_train = train_df["target"]
@@ -392,6 +434,7 @@ def main() -> None:
             "train_rows": int(len(train_df)),
             "valid_rows": int(len(valid_df)),
             "valid_ratio": args.valid_ratio,
+            "split_mode": args.split_mode,
             "feature_columns": feature_cols,
             "lgbm_num_leaves": args.lgbm_num_leaves,
             "lgbm_max_depth": args.lgbm_max_depth,
