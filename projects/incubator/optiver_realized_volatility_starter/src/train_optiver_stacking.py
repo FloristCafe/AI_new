@@ -101,7 +101,25 @@ def parse_args() -> argparse.Namespace:
         "--bagging-size",
         type=int,
         default=3,
-        help="Bootstrap bagging size for LightGBM and MLP base models.",
+        help="Global bootstrap bagging size fallback for LightGBM and MLP base models.",
+    )
+    parser.add_argument(
+        "--lgbm-bagging-size",
+        type=int,
+        default=0,
+        help=(
+            "Bootstrap bagging size used only for LightGBM. "
+            "Use 0 to fall back to --bagging-size."
+        ),
+    )
+    parser.add_argument(
+        "--mlp-bagging-size",
+        type=int,
+        default=0,
+        help=(
+            "Bootstrap bagging size used only for MLP. "
+            "Use 0 to fall back to --bagging-size."
+        ),
     )
     parser.add_argument(
         "--lgbm-num-leaves",
@@ -239,6 +257,14 @@ def evaluate_predictions(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, fl
         "r2": float(r2_score(y_true, y_pred)),
         "rmspe": rmspe(y_true, y_pred),
     }
+
+
+def resolve_bagging_size(model_name: str, args: argparse.Namespace) -> int:
+    if model_name == "lightgbm" and args.lgbm_bagging_size > 0:
+        return args.lgbm_bagging_size
+    if model_name == "mlp" and args.mlp_bagging_size > 0:
+        return args.mlp_bagging_size
+    return args.bagging_size
 
 
 def load_multimodal_dataset(
@@ -385,7 +411,9 @@ def train_bagged_predict(
     y_train: np.ndarray,
     X_predict: np.ndarray,
 ) -> np.ndarray:
-    if args.bagging_size <= 1:
+    bagging_size = resolve_bagging_size(model_name, args)
+
+    if bagging_size <= 1:
         model = build_model(model_name, args)
         model.fit(X_train, y_train)
         pred = model.predict(X_predict)
@@ -394,7 +422,7 @@ def train_bagged_predict(
         return pred
 
     preds: list[np.ndarray] = []
-    for bag_idx in range(args.bagging_size):
+    for bag_idx in range(bagging_size):
         seed = 42 + bag_idx
         X_boot, y_boot = make_bootstrap_sample_array(X_train, y_train, seed)
         model = build_model(model_name, args)
@@ -792,6 +820,8 @@ def main() -> None:
             "meta_feature_columns": list(meta_train_X.columns),
             "meta_use_augmented_features": args.meta_use_augmented_features,
             "bagging_size": args.bagging_size,
+            "lgbm_bagging_size": resolve_bagging_size("lightgbm", args),
+            "mlp_bagging_size": resolve_bagging_size("mlp", args),
             "lgbm_num_leaves": args.lgbm_num_leaves,
             "lgbm_max_depth": args.lgbm_max_depth,
             "lgbm_min_child_samples": args.lgbm_min_child_samples,
