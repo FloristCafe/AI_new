@@ -8,10 +8,11 @@ class MicroRecSimEnv(gym.Env):
     def __init__(self):
         super().__init__()
         self.action_space = gym.spaces.Discrete(5)
+        observation_low = np.zeros(11, dtype=np.float32)
+        observation_high = np.array([1.0] * 10 + [10.0], dtype=np.float32)
         self.observation_space = gym.spaces.Box(
-            low=0.0,
-            high=10.0,
-            shape=(6,),
+            low=observation_low,
+            high=observation_high,
             dtype=np.float32,
         )
         self._rng = np.random.default_rng()
@@ -19,15 +20,22 @@ class MicroRecSimEnv(gym.Env):
         self._fatigue = np.zeros(5, dtype=np.float32)
         self._patience = 10.0
 
+    def _get_observation(self) -> np.ndarray:
+        return np.concatenate(
+            [
+                self._fatigue,
+                self._true_preference,
+                np.array([self._patience], dtype=np.float32),
+            ]
+        ).astype(np.float32)
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self._rng = self.np_random
         self._true_preference = self._rng.uniform(0.2, 0.9, size=5).astype(np.float32)
         self._fatigue = np.zeros(5, dtype=np.float32)
         self._patience = 10.0
-        observation = np.concatenate(
-            [self._fatigue, np.array([self._patience], dtype=np.float32)]
-        ).astype(np.float32)
+        observation = self._get_observation()
         info = {}
         return observation, info
 
@@ -65,9 +73,7 @@ class MicroRecSimEnv(gym.Env):
         else:
             reward = 0.0
 
-        observation = np.concatenate(
-            [self._fatigue, np.array([self._patience], dtype=np.float32)]
-        ).astype(np.float32)
+        observation = self._get_observation()
         info = {
             "clicked": clicked,
             "click_probability": click_probability,
@@ -82,7 +88,7 @@ if __name__ == "__main__":
 
     total_reward = 0.0
     print("Initial observation:", obs)
-    print("Hidden user preference:", env._true_preference)
+    print("Observed user preference:", obs[5:10])
 
     for i in range(100):
         random_action = env.action_space.sample()
@@ -92,7 +98,7 @@ if __name__ == "__main__":
             f"Step {i:02d} | Action {random_action} | "
             f"Reward {reward:>5} | Clicked {info['clicked']} | "
             f"ClickProb {info['click_probability']:.3f} | "
-            f"Patience {obs[5]:.1f} | Fatigue {obs[:5]}"
+            f"Patience {obs[-1]:.1f} | Fatigue {obs[:5]} | Preference {obs[5:10]}"
         )
 
         if terminated or truncated:
