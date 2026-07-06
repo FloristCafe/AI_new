@@ -22,52 +22,103 @@ class EpisodeStats:
     action_counts: np.ndarray
 
 
+@dataclass
+class TrainingResult:
+    agent: "TabularQAgent"
+    encoder: "CompactStateEncoder"
+    history: list[dict]
+    best_snapshot: dict | None
+    best_q_table: np.ndarray
+
+
 class CompactStateEncoder:
     def __init__(self):
         self.action_count = 5
         self.fatigue_bin_edges = np.array([0.33, 0.66], dtype=np.float32)
-        self.state_shape = (5, 5, 3, 11)
+        self.preference_value_bin_edges = np.array([0.45, 0.70], dtype=np.float32)
+        self.preference_gap_bin_edges = np.array([0.08, 0.20], dtype=np.float32)
+        self.state_shape = (3, 3, 3, 3, 3, 5, 5, 3, 3, 11)
 
-    def encode(self, observation: np.ndarray) -> tuple[int, int, int, int]:
+    def encode(
+        self,
+        observation: np.ndarray,
+    ) -> tuple[int, int, int, int, int, int, int, int, int, int]:
         fatigue = observation[: self.action_count]
         preference = observation[self.action_count : self.action_count * 2]
 
-        best_preference_action = int(np.argmax(preference))
-        click_scores = preference * (1.0 - fatigue)
-        best_click_action = int(np.argmax(click_scores))
-        best_preference_fatigue_bucket = int(
+        fatigue_buckets = tuple(
+            int(
+                np.digitize(
+                    fatigue_value,
+                    self.fatigue_bin_edges,
+                    right=False,
+                )
+            )
+            for fatigue_value in fatigue
+        )
+        preference_rank = np.argsort(preference)[::-1]
+        best_preference_action = int(preference_rank[0])
+        second_preference_action = int(preference_rank[1])
+        best_preference_value_bucket = int(
             np.digitize(
-                fatigue[best_preference_action],
-                self.fatigue_bin_edges,
+                preference[best_preference_action],
+                self.preference_value_bin_edges,
+                right=False,
+            )
+        )
+        preference_gap_bucket = int(
+            np.digitize(
+                preference[best_preference_action] - preference[second_preference_action],
+                self.preference_gap_bin_edges,
                 right=False,
             )
         )
         patience_bucket = int(np.clip(np.rint(observation[-1]), 0, 10))
 
-        return (
+        return fatigue_buckets + (
             best_preference_action,
-            best_click_action,
-            best_preference_fatigue_bucket,
+            second_preference_action,
+            best_preference_value_bucket,
+            preference_gap_bucket,
             patience_bucket,
         )
 
     def to_dict(self) -> dict:
         total_states = int(np.prod(self.state_shape))
         return {
+            "encoder_version": "v3",
             "state_shape": list(self.state_shape),
             "total_states": total_states,
             "fatigue_bin_edges": [float(x) for x in self.fatigue_bin_edges],
+            "preference_value_bin_edges": [
+                float(x) for x in self.preference_value_bin_edges
+            ],
+            "preference_gap_bin_edges": [
+                float(x) for x in self.preference_gap_bin_edges
+            ],
             "state_definition": [
+                "fatigue_bucket_action_0",
+                "fatigue_bucket_action_1",
+                "fatigue_bucket_action_2",
+                "fatigue_bucket_action_3",
+                "fatigue_bucket_action_4",
                 "best_preference_action",
-                "best_click_action",
-                "best_preference_fatigue_bucket",
+                "second_preference_action",
+                "best_preference_value_bucket",
+                "preference_gap_bucket",
                 "patience_bucket",
             ],
         }
 
 
 class TabularQAgent:
-    def __init__(self, state_shape: tuple[int, ...], action_count: int, alpha: float, gamma: float):
+    def __init__(
+        self,
+        state_shape: tuple[int, ...],
+        action_count: int,
+        alpha: float,
+        gamma: float,
+    ):
         self.action_count = action_count
         self.alpha = alpha
         self.gamma = gamma
@@ -83,7 +134,11 @@ class TabularQAgent:
             return int(rng.integers(self.action_count))
         return self.greedy_action(state, rng)
 
-    def greedy_action(self, state: tuple[int, ...], rng: np.random.Generator) -> int:
+    def greedy_action(
+        self,
+        state: tuple[int, ...],
+        rng: np.random.Generator,
+    ) -> int:
         q_values = self.q_table[state]
         best_value = np.max(q_values)
         candidates = np.flatnonzero(np.isclose(q_values, best_value))
@@ -292,7 +347,7 @@ def evaluate_agent(
     return aggregate_episode_stats(episode_stats)
 
 
-def train_agent(args: argparse.Namespace) -> tuple[TabularQAgent, CompactStateEncoder, list[dict]]:
+def train_agent(args: argparse.Namespace) -> TrainingResult:
     env = MicroRecSimEnv()
     encoder = CompactStateEncoder()
     agent = TabularQAgent(
@@ -303,6 +358,8 @@ def train_agent(args: argparse.Namespace) -> tuple[TabularQAgent, CompactStateEn
     )
     rng = np.random.default_rng(args.seed)
     history = []
+    best_snapshot = None
+    best_q_table = agent.q_table.copy()
 
     for episode_idx in range(args.train_episodes):
         epsilon = epsilon_by_episode(
@@ -343,32 +400,54 @@ def train_agent(args: argparse.Namespace) -> tuple[TabularQAgent, CompactStateEn
                 "eval": eval_summary,
             }
             history.append(snapshot)
+
+            is_best = (
+                best_snapshot is None
+                or eval_summary["average_total_reward"]
+                > best_snapshot["eval"]["average_total_reward"]
+            )
+            if is_best:
+                best_snapshot = snapshot
+                best_q_table = agent.q_table.copy()
+
+            best_eval_reward = (
+                best_snapshot["eval"]["average_total_reward"]
+                if best_snapshot is not None
+                else float("-inf")
+            )
             print(
                 f"Episode {episode_idx + 1:>5} | "
                 f"epsilon={epsilon:.3f} | "
                 f"train_reward={train_stats.total_reward:>6.2f} | "
                 f"eval_reward={eval_summary['average_total_reward']:>6.3f} | "
+                f"best_eval_reward={best_eval_reward:>6.3f} | "
                 f"eval_clicks={eval_summary['average_clicks']:>6.3f}"
             )
 
-    return agent, encoder, history
+    return TrainingResult(
+        agent=agent,
+        encoder=encoder,
+        history=history,
+        best_snapshot=best_snapshot,
+        best_q_table=best_q_table,
+    )
 
 
 def save_outputs(
     output_dir: Path,
     args: argparse.Namespace,
-    encoder: CompactStateEncoder,
-    agent: TabularQAgent,
-    history: list[dict],
+    result: TrainingResult,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    q_table_path = output_dir / "q_table.npy"
+    final_q_table_path = output_dir / "q_table_final.npy"
+    best_q_table_path = output_dir / "q_table_best.npy"
     metrics_path = output_dir / "training_metrics.json"
 
-    np.save(q_table_path, agent.q_table)
+    np.save(final_q_table_path, result.agent.q_table)
+    np.save(best_q_table_path, result.best_q_table)
 
-    final_eval = history[-1]["eval"] if history else {}
+    final_eval = result.history[-1]["eval"] if result.history else {}
     metrics = {
         "config": {
             "train_episodes": args.train_episodes,
@@ -381,36 +460,38 @@ def save_outputs(
             "eval_every": args.eval_every,
             "seed": args.seed,
         },
-        "encoder": encoder.to_dict(),
-        "q_table_shape": list(agent.q_table.shape),
+        "encoder": result.encoder.to_dict(),
+        "q_table_shape": list(result.agent.q_table.shape),
         "final_eval": final_eval,
-        "history": history,
+        "best_snapshot": result.best_snapshot,
+        "history": result.history,
     }
 
     with metrics_path.open("w", encoding="utf-8") as file:
         json.dump(metrics, file, ensure_ascii=False, indent=2)
 
-    print(f"\nSaved Q-table to: {q_table_path}")
+    print(f"\nSaved final Q-table to: {final_q_table_path}")
+    print(f"Saved best Q-table to: {best_q_table_path}")
     print(f"Saved training metrics to: {metrics_path}")
 
 
 def main() -> None:
     args = parse_args()
-    agent, encoder, history = train_agent(args)
+    result = train_agent(args)
 
     print("\nState encoder summary:")
-    print(json.dumps(encoder.to_dict(), ensure_ascii=False, indent=2))
+    print(json.dumps(result.encoder.to_dict(), ensure_ascii=False, indent=2))
 
-    if history:
+    if result.history:
+        print("\nBest evaluation snapshot:")
+        print(json.dumps(result.best_snapshot, ensure_ascii=False, indent=2))
         print("\nFinal evaluation summary:")
-        print(json.dumps(history[-1]["eval"], ensure_ascii=False, indent=2))
+        print(json.dumps(result.history[-1]["eval"], ensure_ascii=False, indent=2))
 
     save_outputs(
         output_dir=Path(args.output_dir),
         args=args,
-        encoder=encoder,
-        agent=agent,
-        history=history,
+        result=result,
     )
 
 
