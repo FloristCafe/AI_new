@@ -113,6 +113,12 @@ def parse_args() -> argparse.Namespace:
         help="Run greedy evaluation every N training episodes.",
     )
     parser.add_argument(
+        "--early-stop-patience",
+        type=int,
+        default=0,
+        help="Stop after this many eval checkpoints without improving best eval reward. Set 0 to disable.",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -311,6 +317,7 @@ def train_agent(args: argparse.Namespace) -> tuple[DQNAgent, list[dict], dict | 
     history = []
     best_snapshot = None
     best_state_dict = None
+    evals_since_improvement = 0
 
     for episode_idx in range(args.train_episodes):
         epsilon = epsilon_by_episode(
@@ -360,6 +367,9 @@ def train_agent(args: argparse.Namespace) -> tuple[DQNAgent, list[dict], dict | 
             if is_best:
                 best_snapshot = snapshot
                 best_state_dict = copy.deepcopy(agent.state_dict())
+                evals_since_improvement = 0
+            else:
+                evals_since_improvement += 1
 
             best_eval_reward = (
                 best_snapshot["eval"]["average_total_reward"]
@@ -376,6 +386,16 @@ def train_agent(args: argparse.Namespace) -> tuple[DQNAgent, list[dict], dict | 
                 f"eval_clicks={eval_summary['average_clicks']:>6.3f} | "
                 f"avg_loss={avg_loss:>7.4f}"
             )
+
+            if (
+                args.early_stop_patience > 0
+                and evals_since_improvement >= args.early_stop_patience
+            ):
+                print(
+                    f"Early stopping triggered after {evals_since_improvement} "
+                    f"eval checkpoints without improvement."
+                )
+                break
 
     return agent, history, best_snapshot, best_state_dict
 
@@ -417,6 +437,7 @@ def save_outputs(
             "epsilon_start": args.epsilon_start,
             "epsilon_end": args.epsilon_end,
             "eval_every": args.eval_every,
+            "early_stop_patience": args.early_stop_patience,
             "seed": args.seed,
             "device": args.device,
         },

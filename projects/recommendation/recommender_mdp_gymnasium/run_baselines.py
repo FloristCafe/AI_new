@@ -73,7 +73,7 @@ class LeastFatiguePolicy:
 
 class OraclePreferenceGreedyPolicy:
     def __init__(self, rng: np.random.Generator):
-        self.name = "oracle_preference_greedy"
+        self.name = "myopic_oracle_preference_greedy"
         self._rng = rng
 
     def reset_episode(self) -> None:
