@@ -87,6 +87,11 @@ def parse_args() -> argparse.Namespace:
         help="Target sync interval passed to train_dqn.py.",
     )
     parser.add_argument(
+        "--double-dqn",
+        action="store_true",
+        help="Pass Double DQN mode to train_dqn.py.",
+    )
+    parser.add_argument(
         "--epsilon-start",
         type=float,
         default=1.0,
@@ -149,6 +154,7 @@ def run_seed(args: argparse.Namespace, seed: int, train_script: Path, output_roo
         str(args.min_buffer_size),
         "--target-sync-interval",
         str(args.target_sync_interval),
+        *(["--double-dqn"] if args.double_dqn else []),
         "--epsilon-start",
         str(args.epsilon_start),
         "--epsilon-end",
@@ -260,6 +266,7 @@ def main() -> None:
             "replay_buffer_capacity": args.replay_buffer_capacity,
             "min_buffer_size": args.min_buffer_size,
             "target_sync_interval": args.target_sync_interval,
+            "double_dqn": args.double_dqn,
             "epsilon_start": args.epsilon_start,
             "epsilon_end": args.epsilon_end,
             "early_stop_patience": args.early_stop_patience,

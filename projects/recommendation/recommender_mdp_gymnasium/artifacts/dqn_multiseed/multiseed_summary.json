@@ -16,6 +16,7 @@
     "replay_buffer_capacity": 20000,
     "min_buffer_size": 500,
     "target_sync_interval": 200,
+    "double_dqn": true,
     "epsilon_start": 1.0,
     "epsilon_end": 0.05,
     "early_stop_patience": 5,
@@ -25,40 +26,40 @@
     {
       "seed": 7,
       "best_episode": 1600,
-      "best_average_total_reward": -0.03400000184774399,
-      "best_average_clicks": 9.965999603271484,
-      "final_average_total_reward": -0.4740000069141388,
-      "final_average_clicks": 9.526000022888184,
+      "best_average_total_reward": -0.041999999433755875,
+      "best_average_clicks": 9.958000183105469,
+      "final_average_total_reward": -0.4359999895095825,
+      "final_average_clicks": 9.564000129699707,
       "metrics_path": "D:\\Python\\Artificial Intelligence\\projects\\recommendation\\recommender_mdp_gymnasium\\artifacts\\dqn_multiseed\\seed_7\\training_metrics.json"
     },
     {
       "seed": 42,
-      "best_episode": 1400,
-      "best_average_total_reward": -0.041999999433755875,
-      "best_average_clicks": 9.958000183105469,
-      "final_average_total_reward": -0.3160000145435333,
-      "final_average_clicks": 9.684000015258789,
+      "best_episode": 1300,
+      "best_average_total_reward": -0.04399999976158142,
+      "best_average_clicks": 9.956000328063965,
+      "final_average_total_reward": -0.4699999988079071,
+      "final_average_clicks": 9.529999732971191,
       "metrics_path": "D:\\Python\\Artificial Intelligence\\projects\\recommendation\\recommender_mdp_gymnasium\\artifacts\\dqn_multiseed\\seed_42\\training_metrics.json"
     },
     {
       "seed": 123,
-      "best_episode": 1200,
-      "best_average_total_reward": -0.2199999988079071,
-      "best_average_clicks": 9.779999732971191,
-      "final_average_total_reward": -0.4000000059604645,
-      "final_average_clicks": 9.600000381469727,
+      "best_episode": 1500,
+      "best_average_total_reward": -0.13199999928474426,
+      "best_average_clicks": 9.868000030517578,
+      "final_average_total_reward": -0.6919999718666077,
+      "final_average_clicks": 9.307999610900879,
       "metrics_path": "D:\\Python\\Artificial Intelligence\\projects\\recommendation\\recommender_mdp_gymnasium\\artifacts\\dqn_multiseed\\seed_123\\training_metrics.json"
     }
   ],
   "summary": {
     "seed_count": 3,
-    "best_reward_mean": -0.098666666696469,
-    "best_reward_std": 0.08585776261271684,
-    "best_clicks_mean": 9.901333173116049,
-    "best_clicks_std": 0.08585782998184564,
-    "final_reward_mean": -0.39666667580604553,
-    "final_reward_std": 0.06454627649842458,
-    "final_clicks_mean": 9.603333473205566,
-    "final_clicks_std": 0.06454627034238043
+    "best_reward_mean": -0.07266666616002719,
+    "best_reward_std": 0.041962946473401284,
+    "best_clicks_mean": 9.92733351389567,
+    "best_clicks_std": 0.041963051544428434,
+    "final_reward_mean": -0.5326666533946991,
+    "final_reward_std": 0.11351748746198981,
+    "final_clicks_mean": 9.46733315785726,
+    "final_clicks_std": 0.11351766715273846
   }
 }

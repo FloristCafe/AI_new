@@ -11,6 +11,7 @@
     "replay_buffer_capacity": 20000,
     "min_buffer_size": 500,
     "target_sync_interval": 200,
+    "double_dqn": true,
     "epsilon_start": 1.0,
     "epsilon_end": 0.05,
     "eval_every": 100,
@@ -21,41 +22,41 @@
   "observation_dim": 11,
   "action_dim": 5,
   "final_eval": {
-    "average_total_reward": -0.4740000069141388,
-    "average_episode_length": 19.525999069213867,
-    "average_clicks": 9.526000022888184,
+    "average_total_reward": -0.4359999895095825,
+    "average_episode_length": 19.56399917602539,
+    "average_clicks": 9.564000129699707,
     "average_final_patience": 0.0,
     "action_frequency": [
-      0.19297347126907713,
-      0.18856908737068523,
-      0.2066987606268565,
-      0.2436750998668442,
-      0.16808358086653694
+      0.2231649969331425,
+      0.1710284195461051,
+      0.22807196892251072,
+      0.18902065017378858,
+      0.18871396442445307
     ]
   },
   "best_snapshot": {
     "episode": 1600,
     "epsilon": 0.24009504752376198,
-    "train_total_reward": -2.0,
-    "train_steps": 18,
-    "train_clicks": 8,
+    "train_total_reward": -4.0,
+    "train_steps": 16,
+    "train_clicks": 6,
     "updates": {
-      "average_loss": 0.33831292390823364,
-      "average_q_value": -2.265134572982788,
-      "average_target": -2.2797584533691406,
-      "update_steps": 18
+      "average_loss": 0.3183854818344116,
+      "average_q_value": -2.9760913848876953,
+      "average_target": -2.9751248359680176,
+      "update_steps": 16
     },
     "eval": {
-      "average_total_reward": -0.03400000184774399,
-      "average_episode_length": 19.965999603271484,
-      "average_clicks": 9.965999603271484,
+      "average_total_reward": -0.041999999433755875,
+      "average_episode_length": 19.95800018310547,
+      "average_clicks": 9.958000183105469,
       "average_final_patience": 0.0,
       "action_frequency": [
-        0.214063908644696,
-        0.20114194130021035,
-        0.22297906440949614,
-        0.18551537613943705,
-        0.17629970950616047
+        0.20012025253031365,
+        0.1827838460767612,
+        0.2288806493636637,
+        0.20442930153321975,
+        0.18378595049604168
       ]
     }
   },
@@ -63,104 +64,104 @@
     {
       "episode": 100,
       "epsilon": 0.952951475737869,
-      "train_total_reward": 3.0,
-      "train_steps": 23,
-      "train_clicks": 13,
+      "train_total_reward": 4.0,
+      "train_steps": 24,
+      "train_clicks": 14,
       "updates": {
-        "average_loss": 0.7143824100494385,
-        "average_q_value": 2.5066094398498535,
-        "average_target": 2.038060426712036,
-        "update_steps": 23
+        "average_loss": 0.7023975253105164,
+        "average_q_value": 2.386878252029419,
+        "average_target": 1.9301828145980835,
+        "update_steps": 24
       },
       "eval": {
-        "average_total_reward": -4.75600004196167,
-        "average_episode_length": 15.244000434875488,
-        "average_clicks": 5.24399995803833,
+        "average_total_reward": -4.776000022888184,
+        "average_episode_length": 15.223999977111816,
+        "average_clicks": 5.223999977111816,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.4039622146418263,
-          0.40566780372605615,
-          0.0002623983206507478,
-          0.06507478352138546,
-          0.12503279979008133
+          0.44889647924330006,
+          0.06318970047293747,
+          0.0,
+          0.15541250656857594,
+          0.33250131371518654
         ]
       }
     },
     {
       "episode": 200,
       "epsilon": 0.9054277138569284,
-      "train_total_reward": -7.0,
-      "train_steps": 13,
-      "train_clicks": 3,
+      "train_total_reward": -4.0,
+      "train_steps": 16,
+      "train_clicks": 6,
       "updates": {
-        "average_loss": 0.6297475099563599,
-        "average_q_value": 2.6599667072296143,
-        "average_target": 2.6435048580169678,
-        "update_steps": 13
+        "average_loss": 0.6300476789474487,
+        "average_q_value": 2.5937838554382324,
+        "average_target": 2.559441566467285,
+        "update_steps": 16
       },
       "eval": {
-        "average_total_reward": -3.135999917984009,
-        "average_episode_length": 16.86400032043457,
-        "average_clicks": 6.863999843597412,
+        "average_total_reward": -2.109999895095825,
+        "average_episode_length": 17.889999389648438,
+        "average_clicks": 7.889999866485596,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.35424573055028463,
-          0.1255929791271347,
-          0.050877609108159395,
-          0.26956831119544594,
-          0.19971537001897532
+          0.3622135271101174,
+          0.185466741196199,
+          0.09625489100055896,
+          0.16064840693124652,
+          0.19541643376187814
         ]
       }
     },
     {
       "episode": 300,
       "epsilon": 0.857903951975988,
-      "train_total_reward": 0.0,
-      "train_steps": 20,
-      "train_clicks": 10,
+      "train_total_reward": -1.0,
+      "train_steps": 19,
+      "train_clicks": 9,
       "updates": {
-        "average_loss": 0.5992709398269653,
-        "average_q_value": -0.4036833345890045,
-        "average_target": -0.24899885058403015,
-        "update_steps": 20
+        "average_loss": 0.5994019508361816,
+        "average_q_value": 0.7985163331031799,
+        "average_target": 0.8620749115943909,
+        "update_steps": 19
       },
       "eval": {
-        "average_total_reward": -1.2740000486373901,
-        "average_episode_length": 18.72599983215332,
-        "average_clicks": 8.72599983215332,
+        "average_total_reward": -1.8539999723434448,
+        "average_episode_length": 18.145999908447266,
+        "average_clicks": 8.145999908447266,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.25728933034283885,
-          0.21851970522268505,
-          0.09558902061305137,
-          0.18882836697639646,
-          0.2397735768450283
+          0.2724567397773614,
+          0.15904331533120247,
+          0.13137881626804807,
+          0.09963628347845255,
+          0.33748484514493554
         ]
       }
     },
     {
       "episode": 400,
       "epsilon": 0.8103801900950476,
-      "train_total_reward": -4.0,
-      "train_steps": 16,
-      "train_clicks": 6,
+      "train_total_reward": -1.0,
+      "train_steps": 19,
+      "train_clicks": 9,
       "updates": {
-        "average_loss": 0.5131819248199463,
-        "average_q_value": -1.1387808322906494,
-        "average_target": -1.1042234897613525,
-        "update_steps": 16
+        "average_loss": 0.5234636664390564,
+        "average_q_value": -0.9351292848587036,
+        "average_target": -0.9261631369590759,
+        "update_steps": 19
       },
       "eval": {
-        "average_total_reward": -1.0779999494552612,
-        "average_episode_length": 18.922000885009766,
-        "average_clicks": 8.92199993133545,
+        "average_total_reward": -1.2020000219345093,
+        "average_episode_length": 18.79800033569336,
+        "average_clicks": 8.79800033569336,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.23041961737659866,
-          0.19247436845999366,
-          0.12334848324701406,
-          0.23348483247014057,
-          0.22027269844625305
+          0.2554527077348654,
+          0.1393765294180232,
+          0.18267900840514947,
+          0.15065432492818384,
+          0.27183742951377804
         ]
       }
     },
@@ -171,48 +172,48 @@
       "train_steps": 13,
       "train_clicks": 3,
       "updates": {
-        "average_loss": 0.4612954556941986,
-        "average_q_value": -1.3783454895019531,
-        "average_target": -1.322037935256958,
+        "average_loss": 0.44266411662101746,
+        "average_q_value": -1.2155170440673828,
+        "average_target": -1.1746165752410889,
         "update_steps": 13
       },
       "eval": {
-        "average_total_reward": -1.2039999961853027,
-        "average_episode_length": 18.79599952697754,
-        "average_clicks": 8.795999526977539,
+        "average_total_reward": -0.8939999938011169,
+        "average_episode_length": 19.106000900268555,
+        "average_clicks": 9.105999946594238,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.19865928921047032,
-          0.15982123856139605,
-          0.18610342626090656,
-          0.2120663971057672,
-          0.24334964886145988
+          0.22296660734847693,
+          0.17533759028577411,
+          0.230189469276667,
+          0.1455040301475976,
+          0.22600230294148435
         ]
       }
     },
     {
       "episode": 600,
       "epsilon": 0.7153326663331666,
-      "train_total_reward": -4.0,
-      "train_steps": 16,
-      "train_clicks": 6,
+      "train_total_reward": -3.0,
+      "train_steps": 17,
+      "train_clicks": 7,
       "updates": {
-        "average_loss": 0.4568864703178406,
-        "average_q_value": -1.0353095531463623,
-        "average_target": -1.00352144241333,
-        "update_steps": 16
+        "average_loss": 0.42706117033958435,
+        "average_q_value": -1.2708795070648193,
+        "average_target": -1.2461786270141602,
+        "update_steps": 17
       },
       "eval": {
-        "average_total_reward": -0.9559999704360962,
-        "average_episode_length": 19.04400062561035,
-        "average_clicks": 9.043999671936035,
+        "average_total_reward": -0.6919999718666077,
+        "average_episode_length": 19.308000564575195,
+        "average_clicks": 9.307999610900879,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.20321361058601134,
-          0.1947069943289225,
-          0.16435622768325983,
-          0.22600294055870615,
-          0.21172022684310018
+          0.2508804640563497,
+          0.1840687797804019,
+          0.17298529107105862,
+          0.20789310130515848,
+          0.18417236378703128
         ]
       }
     },
@@ -223,100 +224,100 @@
       "train_steps": 15,
       "train_clicks": 5,
       "updates": {
-        "average_loss": 0.4323834180831909,
-        "average_q_value": -1.1121189594268799,
-        "average_target": -1.0605090856552124,
+        "average_loss": 0.4076522886753082,
+        "average_q_value": -1.2547799348831177,
+        "average_target": -1.2917550802230835,
         "update_steps": 15
       },
       "eval": {
-        "average_total_reward": -1.1820000410079956,
-        "average_episode_length": 18.81800079345703,
-        "average_clicks": 8.817999839782715,
+        "average_total_reward": -0.9200000166893005,
+        "average_episode_length": 19.079999923706055,
+        "average_clicks": 9.079999923706055,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.14698692740992667,
-          0.24444680624933574,
-          0.2096928472738867,
-          0.19311297693697524,
-          0.20576044212987565
+          0.1877358490566038,
+          0.17557651991614256,
+          0.21729559748427674,
+          0.1810272536687631,
+          0.23836477987421384
         ]
       }
     },
     {
       "episode": 800,
       "epsilon": 0.6202851425712856,
-      "train_total_reward": -1.0,
-      "train_steps": 19,
-      "train_clicks": 9,
+      "train_total_reward": 0.0,
+      "train_steps": 20,
+      "train_clicks": 10,
       "updates": {
-        "average_loss": 0.44088736176490784,
-        "average_q_value": -1.3996236324310303,
-        "average_target": -1.2882782220840454,
-        "update_steps": 19
+        "average_loss": 0.3679824769496918,
+        "average_q_value": -1.5653008222579956,
+        "average_target": -1.5492668151855469,
+        "update_steps": 20
       },
       "eval": {
-        "average_total_reward": -0.8539999723434448,
-        "average_episode_length": 19.145999908447266,
-        "average_clicks": 9.145999908447266,
+        "average_total_reward": -0.9259999990463257,
+        "average_episode_length": 19.073999404907227,
+        "average_clicks": 9.074000358581543,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.20505588634701766,
-          0.21675545805912463,
-          0.21550193251854174,
-          0.17027055259584248,
-          0.19241617047947351
+          0.2393834539163259,
+          0.21935619167453077,
+          0.16084722659117123,
+          0.1457481388277236,
+          0.2346649889902485
         ]
       }
     },
     {
       "episode": 900,
       "epsilon": 0.5727613806903451,
-      "train_total_reward": -1.0,
-      "train_steps": 19,
-      "train_clicks": 9,
+      "train_total_reward": -4.0,
+      "train_steps": 16,
+      "train_clicks": 6,
       "updates": {
-        "average_loss": 0.4157525897026062,
-        "average_q_value": -1.6141475439071655,
-        "average_target": -1.6262460947036743,
-        "update_steps": 19
+        "average_loss": 0.35119950771331787,
+        "average_q_value": -1.9572527408599854,
+        "average_target": -1.921641230583191,
+        "update_steps": 16
       },
       "eval": {
-        "average_total_reward": -0.7179999947547913,
-        "average_episode_length": 19.281999588012695,
-        "average_clicks": 9.281999588012695,
+        "average_total_reward": -0.5799999833106995,
+        "average_episode_length": 19.420000076293945,
+        "average_clicks": 9.420000076293945,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.2072399128721087,
-          0.20226117622653253,
-          0.233585727621616,
-          0.17716004563841925,
-          0.1797531376413235
+          0.21462409886714728,
+          0.19011328527291452,
+          0.1920700308959835,
+          0.17868177136972194,
+          0.22451081359423275
         ]
       }
     },
     {
       "episode": 1000,
       "epsilon": 0.5252376188094048,
-      "train_total_reward": -2.0,
-      "train_steps": 18,
-      "train_clicks": 8,
+      "train_total_reward": -5.0,
+      "train_steps": 15,
+      "train_clicks": 5,
       "updates": {
-        "average_loss": 0.36453723907470703,
-        "average_q_value": -1.5980172157287598,
-        "average_target": -1.5410507917404175,
-        "update_steps": 18
+        "average_loss": 0.3413921594619751,
+        "average_q_value": -1.7605293989181519,
+        "average_target": -1.7207069396972656,
+        "update_steps": 15
       },
       "eval": {
-        "average_total_reward": -0.5960000157356262,
-        "average_episode_length": 19.40399932861328,
-        "average_clicks": 9.404000282287598,
+        "average_total_reward": -0.46399998664855957,
+        "average_episode_length": 19.535999298095703,
+        "average_clicks": 9.53600025177002,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.21882086167800455,
-          0.21572871572871574,
-          0.21469800041228612,
-          0.13749742321170894,
-          0.21325499896928468
+          0.22348484848484848,
+          0.21519246519246518,
+          0.17065929565929566,
+          0.1856060606060606,
+          0.20505733005733007
         ]
       }
     },
@@ -327,22 +328,22 @@
       "train_steps": 15,
       "train_clicks": 5,
       "updates": {
-        "average_loss": 0.36506301164627075,
-        "average_q_value": -1.6686385869979858,
-        "average_target": -1.615087628364563,
+        "average_loss": 0.3443967401981354,
+        "average_q_value": -1.9553686380386353,
+        "average_target": -1.9516738653182983,
         "update_steps": 15
       },
       "eval": {
-        "average_total_reward": -0.7379999756813049,
-        "average_episode_length": 19.261999130249023,
-        "average_clicks": 9.26200008392334,
+        "average_total_reward": -0.5,
+        "average_episode_length": 19.5,
+        "average_clicks": 9.5,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.23227079223341293,
-          0.1548125843629945,
-          0.25282940504620494,
-          0.18481985255944347,
-          0.17526736579794414
+          0.2276923076923077,
+          0.20092307692307693,
+          0.17928205128205127,
+          0.1921025641025641,
+          0.2
         ]
       }
     },
@@ -353,22 +354,22 @@
       "train_steps": 17,
       "train_clicks": 7,
       "updates": {
-        "average_loss": 0.3598518371582031,
-        "average_q_value": -2.1250784397125244,
-        "average_target": -2.06746506690979,
+        "average_loss": 0.35528603196144104,
+        "average_q_value": -2.0530319213867188,
+        "average_target": -2.0555508136749268,
         "update_steps": 17
       },
       "eval": {
-        "average_total_reward": -0.3319999873638153,
-        "average_episode_length": 19.667999267578125,
-        "average_clicks": 9.668000221252441,
+        "average_total_reward": -0.25600001215934753,
+        "average_episode_length": 19.743999481201172,
+        "average_clicks": 9.744000434875488,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.21923937360178972,
-          0.18812283912955055,
-          0.2252389668497051,
-          0.14988814317673377,
-          0.21751067724222087
+          0.21515397082658022,
+          0.21120340356564019,
+          0.2222447325769854,
+          0.14444894651539708,
+          0.20694894651539708
         ]
       }
     },
@@ -379,10 +380,62 @@
       "train_steps": 17,
       "train_clicks": 7,
       "updates": {
-        "average_loss": 0.3730780780315399,
-        "average_q_value": -2.029594659805298,
-        "average_target": -1.9884107112884521,
+        "average_loss": 0.32605794072151184,
+        "average_q_value": -2.3955113887786865,
+        "average_target": -2.36513614654541,
         "update_steps": 17
+      },
+      "eval": {
+        "average_total_reward": -0.1860000044107437,
+        "average_episode_length": 19.81399917602539,
+        "average_clicks": 9.814000129699707,
+        "average_final_patience": 0.0,
+        "action_frequency": [
+          0.20117088927021298,
+          0.23498536388412233,
+          0.21227414959119814,
+          0.14918744322196426,
+          0.20238215403250226
+        ]
+      }
+    },
+    {
+      "episode": 1400,
+      "epsilon": 0.33514257128564284,
+      "train_total_reward": -4.0,
+      "train_steps": 16,
+      "train_clicks": 6,
+      "updates": {
+        "average_loss": 0.31650519371032715,
+        "average_q_value": -2.358245372772217,
+        "average_target": -2.2913432121276855,
+        "update_steps": 16
+      },
+      "eval": {
+        "average_total_reward": -0.11400000005960464,
+        "average_episode_length": 19.88599967956543,
+        "average_clicks": 9.88599967956543,
+        "average_final_patience": 0.0,
+        "action_frequency": [
+          0.21432163330986623,
+          0.2173388313386302,
+          0.20366086694156693,
+          0.1821381876697174,
+          0.18254048074021925
+        ]
+      }
+    },
+    {
+      "episode": 1500,
+      "epsilon": 0.2876188094047024,
+      "train_total_reward": 3.0,
+      "train_steps": 23,
+      "train_clicks": 13,
+      "updates": {
+        "average_loss": 0.31874778866767883,
+        "average_q_value": -2.6428658962249756,
+        "average_target": -2.6145641803741455,
+        "update_steps": 23
       },
       "eval": {
         "average_total_reward": -0.1120000034570694,
@@ -390,89 +443,37 @@
         "average_clicks": 9.887999534606934,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.18061142397425584,
-          0.1833266291230893,
-          0.23954143201930814,
-          0.19318181818181818,
-          0.20333869670152857
-        ]
-      }
-    },
-    {
-      "episode": 1400,
-      "epsilon": 0.33514257128564284,
-      "train_total_reward": -6.0,
-      "train_steps": 14,
-      "train_clicks": 4,
-      "updates": {
-        "average_loss": 0.3479244112968445,
-        "average_q_value": -1.8606661558151245,
-        "average_target": -1.8703737258911133,
-        "update_steps": 14
-      },
-      "eval": {
-        "average_total_reward": -0.22200000286102295,
-        "average_episode_length": 19.777999877929688,
-        "average_clicks": 9.777999877929688,
-        "average_final_patience": 0.0,
-        "action_frequency": [
-          0.1867731823237941,
-          0.1925371625037921,
-          0.23227828900798866,
-          0.20082920416624533,
-          0.18758216199817979
-        ]
-      }
-    },
-    {
-      "episode": 1500,
-      "epsilon": 0.2876188094047024,
-      "train_total_reward": 5.0,
-      "train_steps": 25,
-      "train_clicks": 15,
-      "updates": {
-        "average_loss": 0.32721614837646484,
-        "average_q_value": -2.3074216842651367,
-        "average_target": -2.290442705154419,
-        "update_steps": 25
-      },
-      "eval": {
-        "average_total_reward": -0.2840000092983246,
-        "average_episode_length": 19.715999603271484,
-        "average_clicks": 9.715999603271484,
-        "average_final_patience": 0.0,
-        "action_frequency": [
-          0.18533171028606207,
-          0.18969364982755121,
-          0.18796916210184622,
-          0.24426861432339217,
-          0.1927368634611483
+          0.19871279163314562,
+          0.20213193885760258,
+          0.19237731295253419,
+          0.18634352373290428,
+          0.22043443282381336
         ]
       }
     },
     {
       "episode": 1600,
       "epsilon": 0.24009504752376198,
-      "train_total_reward": -2.0,
-      "train_steps": 18,
-      "train_clicks": 8,
+      "train_total_reward": -4.0,
+      "train_steps": 16,
+      "train_clicks": 6,
       "updates": {
-        "average_loss": 0.33831292390823364,
-        "average_q_value": -2.265134572982788,
-        "average_target": -2.2797584533691406,
-        "update_steps": 18
+        "average_loss": 0.3183854818344116,
+        "average_q_value": -2.9760913848876953,
+        "average_target": -2.9751248359680176,
+        "update_steps": 16
       },
       "eval": {
-        "average_total_reward": -0.03400000184774399,
-        "average_episode_length": 19.965999603271484,
-        "average_clicks": 9.965999603271484,
+        "average_total_reward": -0.041999999433755875,
+        "average_episode_length": 19.95800018310547,
+        "average_clicks": 9.958000183105469,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.214063908644696,
-          0.20114194130021035,
-          0.22297906440949614,
-          0.18551537613943705,
-          0.17629970950616047
+          0.20012025253031365,
+          0.1827838460767612,
+          0.2288806493636637,
+          0.20442930153321975,
+          0.18378595049604168
         ]
       }
     },
@@ -483,22 +484,22 @@
       "train_steps": 27,
       "train_clicks": 17,
       "updates": {
-        "average_loss": 0.353316068649292,
-        "average_q_value": -2.5231571197509766,
-        "average_target": -2.4955499172210693,
+        "average_loss": 0.3161467909812927,
+        "average_q_value": -2.8178460597991943,
+        "average_target": -2.7949585914611816,
         "update_steps": 27
       },
       "eval": {
-        "average_total_reward": -0.20200000703334808,
-        "average_episode_length": 19.79800033569336,
-        "average_clicks": 9.79800033569336,
+        "average_total_reward": -0.19599999487400055,
+        "average_episode_length": 19.804000854492188,
+        "average_clicks": 9.803999900817871,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.18809980806142035,
-          0.1831498131124356,
-          0.22689160521264773,
-          0.22557834124659057,
-          0.17628043236690574
+          0.20793779034538476,
+          0.1655221167440921,
+          0.21409816198747728,
+          0.1972328822460109,
+          0.21520904867703494
         ]
       }
     },
@@ -509,10 +510,36 @@
       "train_steps": 23,
       "train_clicks": 13,
       "updates": {
-        "average_loss": 0.34109488129615784,
-        "average_q_value": -2.773223638534546,
-        "average_target": -2.752152919769287,
+        "average_loss": 0.32638436555862427,
+        "average_q_value": -2.990844488143921,
+        "average_target": -2.9643213748931885,
         "update_steps": 23
+      },
+      "eval": {
+        "average_total_reward": -0.4779999852180481,
+        "average_episode_length": 19.52199935913086,
+        "average_clicks": 9.522000312805176,
+        "average_final_patience": 0.0,
+        "action_frequency": [
+          0.2459788956049585,
+          0.1857391660690503,
+          0.20684356111054195,
+          0.16852781477307652,
+          0.1929105624423727
+        ]
+      }
+    },
+    {
+      "episode": 1900,
+      "epsilon": 0.09752376188094047,
+      "train_total_reward": -2.0,
+      "train_steps": 18,
+      "train_clicks": 8,
+      "updates": {
+        "average_loss": 0.30443811416625977,
+        "average_q_value": -2.5711896419525146,
+        "average_target": -2.578023672103882,
+        "update_steps": 18
       },
       "eval": {
         "average_total_reward": -0.414000004529953,
@@ -520,63 +547,37 @@
         "average_clicks": 9.586000442504883,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.1795159808026141,
-          0.20708669457775963,
-          0.22475237414479732,
-          0.22413969161646075,
-          0.16450525885836823
-        ]
-      }
-    },
-    {
-      "episode": 1900,
-      "epsilon": 0.09752376188094047,
-      "train_total_reward": -4.0,
-      "train_steps": 16,
-      "train_clicks": 6,
-      "updates": {
-        "average_loss": 0.3548668622970581,
-        "average_q_value": -2.8552656173706055,
-        "average_target": -2.798419713973999,
-        "update_steps": 16
-      },
-      "eval": {
-        "average_total_reward": -0.47600001096725464,
-        "average_episode_length": 19.52400016784668,
-        "average_clicks": 9.52400016784668,
-        "average_final_patience": 0.0,
-        "action_frequency": [
-          0.23724646588813766,
-          0.15642286416717885,
-          0.19094447859045277,
-          0.25527555828723625,
-          0.16011063306699447
+          0.22189318901256,
+          0.19789645665271113,
+          0.21637904625753088,
+          0.16573062391504137,
+          0.19810068416215665
         ]
       }
     },
     {
       "episode": 2000,
       "epsilon": 0.050000000000000044,
-      "train_total_reward": -3.0,
-      "train_steps": 17,
-      "train_clicks": 7,
+      "train_total_reward": -4.0,
+      "train_steps": 16,
+      "train_clicks": 6,
       "updates": {
-        "average_loss": 0.34975090622901917,
-        "average_q_value": -2.717012882232666,
-        "average_target": -2.6792562007904053,
-        "update_steps": 17
+        "average_loss": 0.3057411313056946,
+        "average_q_value": -3.200925350189209,
+        "average_target": -3.167628765106201,
+        "update_steps": 16
       },
       "eval": {
-        "average_total_reward": -0.4740000069141388,
-        "average_episode_length": 19.525999069213867,
-        "average_clicks": 9.526000022888184,
+        "average_total_reward": -0.4359999895095825,
+        "average_episode_length": 19.56399917602539,
+        "average_clicks": 9.564000129699707,
         "average_final_patience": 0.0,
         "action_frequency": [
-          0.19297347126907713,
-          0.18856908737068523,
-          0.2066987606268565,
-          0.2436750998668442,
-          0.16808358086653694
+          0.2231649969331425,
+          0.1710284195461051,
+          0.22807196892251072,
+          0.18902065017378858,
+          0.18871396442445307
         ]
       }
     }

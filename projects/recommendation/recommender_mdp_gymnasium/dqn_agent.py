@@ -123,6 +123,7 @@ class DQNAgent:
         batch_size: int,
         target_sync_interval: int,
         replay_buffer_capacity: int,
+        double_dqn: bool,
         device: torch.device,
         seed: int,
     ):
@@ -131,6 +132,7 @@ class DQNAgent:
         self.gamma = gamma
         self.batch_size = batch_size
         self.target_sync_interval = target_sync_interval
+        self.double_dqn = double_dqn
         self.device = device
         self.rng = np.random.default_rng(seed)
 
@@ -208,8 +210,15 @@ class DQNAgent:
         ).squeeze(1)
 
         with torch.no_grad():
-            next_q_values = self.target_network(batch.next_observations)
-            best_next_values = next_q_values.max(dim=1).values
+            if self.double_dqn:
+                # Double DQN: online net selects, target net evaluates.
+                next_online_q_values = self.q_network(batch.next_observations)
+                next_actions = next_online_q_values.argmax(dim=1, keepdim=True)
+                next_target_q_values = self.target_network(batch.next_observations)
+                best_next_values = next_target_q_values.gather(1, next_actions).squeeze(1)
+            else:
+                next_q_values = self.target_network(batch.next_observations)
+                best_next_values = next_q_values.max(dim=1).values
             targets = batch.rewards + self.gamma * (1.0 - batch.dones) * best_next_values
 
         loss = self.loss_fn(current_action_values, targets)

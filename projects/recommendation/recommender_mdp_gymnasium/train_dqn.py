@@ -95,6 +95,11 @@ def parse_args() -> argparse.Namespace:
         help="Sync target network every N gradient updates.",
     )
     parser.add_argument(
+        "--double-dqn",
+        action="store_true",
+        help="Use Double DQN target computation instead of standard DQN max target.",
+    )
+    parser.add_argument(
         "--epsilon-start",
         type=float,
         default=1.0,
@@ -310,6 +315,7 @@ def train_agent(args: argparse.Namespace) -> tuple[DQNAgent, list[dict], dict | 
         batch_size=args.batch_size,
         target_sync_interval=args.target_sync_interval,
         replay_buffer_capacity=args.replay_buffer_capacity,
+        double_dqn=args.double_dqn,
         device=device,
         seed=args.seed,
     )
@@ -434,6 +440,7 @@ def save_outputs(
             "replay_buffer_capacity": args.replay_buffer_capacity,
             "min_buffer_size": args.min_buffer_size,
             "target_sync_interval": args.target_sync_interval,
+            "double_dqn": args.double_dqn,
             "epsilon_start": args.epsilon_start,
             "epsilon_end": args.epsilon_end,
             "eval_every": args.eval_every,
@@ -465,6 +472,7 @@ def main() -> None:
         "action_dim": agent.action_dim,
         "hidden_dim": args.hidden_dim,
         "activation": args.activation,
+        "double_dqn": args.double_dqn,
         "device": str(agent.device),
     }
     print("\nNetwork summary:")
