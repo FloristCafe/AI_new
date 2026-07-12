@@ -65,6 +65,18 @@ def parse_args() -> argparse.Namespace:
         help="Learning rate for Adam.",
     )
     parser.add_argument(
+        "--learning-rate-end",
+        type=float,
+        default=None,
+        help="Final learning rate after decay. Leave unset to keep a constant learning rate.",
+    )
+    parser.add_argument(
+        "--lr-decay-start-fraction",
+        type=float,
+        default=0.7,
+        help="Fraction of training after which learning-rate decay begins.",
+    )
+    parser.add_argument(
         "--gamma",
         type=float,
         default=0.95,
@@ -166,6 +178,30 @@ def epsilon_by_episode(
 
     progress = min(episode_idx / (total_episodes - 1), 1.0)
     return float(epsilon_start + progress * (epsilon_end - epsilon_start))
+
+
+def learning_rate_by_episode(
+    episode_idx: int,
+    total_episodes: int,
+    learning_rate_start: float,
+    learning_rate_end: float | None,
+    decay_start_fraction: float,
+) -> float:
+    if learning_rate_end is None or total_episodes <= 1:
+        return float(learning_rate_start)
+
+    decay_start_fraction = min(max(decay_start_fraction, 0.0), 1.0)
+    decay_start_episode = int((total_episodes - 1) * decay_start_fraction)
+
+    if episode_idx <= decay_start_episode:
+        return float(learning_rate_start)
+
+    decay_length = max((total_episodes - 1) - decay_start_episode, 1)
+    decay_progress = min((episode_idx - decay_start_episode) / decay_length, 1.0)
+    return float(
+        learning_rate_start
+        + decay_progress * (learning_rate_end - learning_rate_start)
+    )
 
 
 def run_episode(
@@ -332,6 +368,14 @@ def train_agent(args: argparse.Namespace) -> tuple[DQNAgent, list[dict], dict | 
             epsilon_start=args.epsilon_start,
             epsilon_end=args.epsilon_end,
         )
+        learning_rate = learning_rate_by_episode(
+            episode_idx=episode_idx,
+            total_episodes=args.train_episodes,
+            learning_rate_start=args.learning_rate,
+            learning_rate_end=args.learning_rate_end,
+            decay_start_fraction=args.lr_decay_start_fraction,
+        )
+        agent.set_learning_rate(learning_rate)
         episode_seed = args.seed + episode_idx
         train_stats, update_metrics = run_episode(
             env=env,
@@ -383,9 +427,11 @@ def train_agent(args: argparse.Namespace) -> tuple[DQNAgent, list[dict], dict | 
                 else float("-inf")
             )
             avg_loss = update_summary.get("average_loss", float("nan"))
+            current_learning_rate = agent.get_learning_rate()
             print(
                 f"Episode {episode_idx + 1:>5} | "
                 f"epsilon={epsilon:.3f} | "
+                f"lr={current_learning_rate:.6f} | "
                 f"train_reward={train_stats.total_reward:>6.2f} | "
                 f"eval_reward={eval_summary['average_total_reward']:>6.3f} | "
                 f"best_eval_reward={best_eval_reward:>6.3f} | "
@@ -435,6 +481,8 @@ def save_outputs(
             "hidden_dim": args.hidden_dim,
             "activation": args.activation,
             "learning_rate": args.learning_rate,
+            "learning_rate_end": args.learning_rate_end,
+            "lr_decay_start_fraction": args.lr_decay_start_fraction,
             "gamma": args.gamma,
             "batch_size": args.batch_size,
             "replay_buffer_capacity": args.replay_buffer_capacity,
@@ -473,6 +521,8 @@ def main() -> None:
         "hidden_dim": args.hidden_dim,
         "activation": args.activation,
         "double_dqn": args.double_dqn,
+        "learning_rate_start": args.learning_rate,
+        "learning_rate_end": args.learning_rate_end,
         "device": str(agent.device),
     }
     print("\nNetwork summary:")

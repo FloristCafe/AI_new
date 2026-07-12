@@ -57,6 +57,18 @@ def parse_args() -> argparse.Namespace:
         help="Learning rate passed to train_dqn.py.",
     )
     parser.add_argument(
+        "--learning-rate-end",
+        type=float,
+        default=None,
+        help="Final learning rate passed to train_dqn.py. Leave unset to disable decay.",
+    )
+    parser.add_argument(
+        "--lr-decay-start-fraction",
+        type=float,
+        default=0.7,
+        help="Training fraction after which learning-rate decay begins.",
+    )
+    parser.add_argument(
         "--gamma",
         type=float,
         default=0.95,
@@ -144,6 +156,9 @@ def run_seed(args: argparse.Namespace, seed: int, train_script: Path, output_roo
         args.activation,
         "--learning-rate",
         str(args.learning_rate),
+        *(["--learning-rate-end", str(args.learning_rate_end)] if args.learning_rate_end is not None else []),
+        "--lr-decay-start-fraction",
+        str(args.lr_decay_start_fraction),
         "--gamma",
         str(args.gamma),
         "--batch-size",
@@ -261,6 +276,8 @@ def main() -> None:
             "hidden_dim": args.hidden_dim,
             "activation": args.activation,
             "learning_rate": args.learning_rate,
+            "learning_rate_end": args.learning_rate_end,
+            "lr_decay_start_fraction": args.lr_decay_start_fraction,
             "gamma": args.gamma,
             "batch_size": args.batch_size,
             "replay_buffer_capacity": args.replay_buffer_capacity,

@@ -196,6 +196,13 @@ class DQNAgent:
     def can_update(self, min_buffer_size: int) -> bool:
         return len(self.replay_buffer) >= max(min_buffer_size, self.batch_size)
 
+    def set_learning_rate(self, learning_rate: float) -> None:
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = learning_rate
+
+    def get_learning_rate(self) -> float:
+        return float(self.optimizer.param_groups[0]["lr"])
+
     def update(self) -> dict[str, float]:
         batch = self.replay_buffer.sample(
             batch_size=self.batch_size,
