@@ -1,0 +1,7 @@
+{
+  "input_path": "D:\\Python\\Datasets\\movielens_1m\\processed\\interactions.csv",
+  "output_dir": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed",
+  "max_seq_len": 50,
+  "min_user_interactions": 5,
+  "status": "skeleton_only"
+}

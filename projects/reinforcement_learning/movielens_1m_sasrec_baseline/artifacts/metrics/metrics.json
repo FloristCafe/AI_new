@@ -1,0 +1,10 @@
+{
+  "status": "skeleton_only",
+  "data_dir": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed",
+  "max_seq_len": 50,
+  "embedding_dim": 64,
+  "num_heads": 2,
+  "num_blocks": 2,
+  "dropout": 0.2,
+  "device": "cpu"
+}

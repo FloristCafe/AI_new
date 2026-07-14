@@ -1,0 +1,28 @@
+{
+  "input_path": "D:\\Python\\Datasets\\movielens_1m\\processed\\interactions.csv",
+  "output_dir": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed",
+  "max_seq_len": 50,
+  "min_user_interactions": 5,
+  "min_item_interactions": 1,
+  "sample_user_limit": 0,
+  "raw_interaction_count": 1000209,
+  "raw_user_count": 6040,
+  "raw_item_count": 3706,
+  "kept_user_count": 6040,
+  "kept_item_count": 3706,
+  "train_sample_count": 982089,
+  "valid_user_count": 6040,
+  "test_user_count": 6040,
+  "filter_stats": {
+    "removed_user_count": 0,
+    "kept_user_count": 6040,
+    "kept_item_count": 3706
+  },
+  "artifacts": {
+    "train_sequences": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed\\train_sequences.npz",
+    "valid_sequences": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed\\valid_sequences.npz",
+    "test_sequences": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed\\test_sequences.npz",
+    "user_mapping": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed\\user_id_mapping.csv",
+    "item_mapping": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed\\item_id_mapping.csv"
+  }
+}

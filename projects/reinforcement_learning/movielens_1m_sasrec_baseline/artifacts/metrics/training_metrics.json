@@ -1,0 +1,71 @@
+{
+  "data_dir": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed",
+  "device": "cuda",
+  "seed": 42,
+  "epochs": 10,
+  "batch_size": 256,
+  "learning_rate": 0.001,
+  "weight_decay": 1e-05,
+  "embedding_dim": 64,
+  "num_heads": 2,
+  "num_blocks": 2,
+  "dropout": 0.2,
+  "train_sample_count": 982089,
+  "num_items": 3706,
+  "max_seq_len": 50,
+  "best_loss": 6.01918377441938,
+  "best_checkpoint_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\checkpoints\\sasrec_best.pt",
+  "final_checkpoint_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\checkpoints\\sasrec_final.pt",
+  "epoch_metrics": [
+    {
+      "loss": 8.239766330235325,
+      "accuracy": 0.002830700679877282,
+      "epoch": 1.0
+    },
+    {
+      "loss": 7.202419152470563,
+      "accuracy": 0.005733696233233445,
+      "epoch": 2.0
+    },
+    {
+      "loss": 6.823762553998457,
+      "accuracy": 0.009448227197331403,
+      "epoch": 3.0
+    },
+    {
+      "loss": 6.539088205047267,
+      "accuracy": 0.01238278811798116,
+      "epoch": 4.0
+    },
+    {
+      "loss": 6.373256880119849,
+      "accuracy": 0.014191178192607798,
+      "epoch": 5.0
+    },
+    {
+      "loss": 6.260831854519175,
+      "accuracy": 0.015534233659067559,
+      "epoch": 6.0
+    },
+    {
+      "loss": 6.176796754939264,
+      "accuracy": 0.016809067202666967,
+      "epoch": 7.0
+    },
+    {
+      "loss": 6.110602234152333,
+      "accuracy": 0.017687806298614484,
+      "epoch": 8.0
+    },
+    {
+      "loss": 6.057751670087327,
+      "accuracy": 0.01843315626180519,
+      "epoch": 9.0
+    },
+    {
+      "loss": 6.01918377441938,
+      "accuracy": 0.019180542700305166,
+      "epoch": 10.0
+    }
+  ]
+}

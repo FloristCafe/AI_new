@@ -1,0 +1,7 @@
+{
+  "status": "skeleton_only",
+  "data_dir": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed",
+  "checkpoint_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\checkpoints\\sasrec_init.pt",
+  "hr_at_10": null,
+  "ndcg_at_10": null
+}
