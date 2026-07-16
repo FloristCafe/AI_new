@@ -24,6 +24,9 @@
 - `src/train_sasrec.py`
   - 读取预处理产物
   - 训练 SASRec
+  - 每个 epoch 在验证集上计算 `HR@10` 与 `NDCG@10`
+  - 按验证指标选择 best checkpoint
+  - 支持 early stopping
   - 保存 `sasrec_best.pt` 与 `sasrec_final.pt`
   - 保存 `training_metrics.json`
 - `src/evaluate_sasrec.py`
@@ -58,6 +61,7 @@
 - `artifacts/checkpoints/sasrec_best.pt`
 - `artifacts/checkpoints/sasrec_final.pt`
 - `artifacts/metrics/training_metrics.json`
+  - 包含每个 epoch 的 train / valid 指标曲线
 
 ## 评估产物
 
@@ -78,6 +82,10 @@
 
 ```powershell
 & "C:\Users\lenovo\miniconda3\envs\kg_env\python.exe" "D:\Python\Artificial Intelligence\projects\reinforcement_learning\movielens_1m_sasrec_baseline\src\train_sasrec.py"
+```
+
+```powershell
+python "D:\Python\Artificial Intelligence\projects\reinforcement_learning\movielens_1m_sasrec_baseline\src\train_sasrec.py" --selection-metric ndcg_at_10 --early-stop-patience 3
 ```
 
 ```powershell

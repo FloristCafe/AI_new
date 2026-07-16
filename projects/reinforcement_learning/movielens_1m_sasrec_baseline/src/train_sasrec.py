@@ -6,9 +6,15 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 
 from sasrec_model import SASRec
+from sasrec_utils import (
+    evaluate_ranking_metrics,
+    load_metadata,
+    load_sequence_dataset,
+    resolve_device,
+)
 
 
 DEFAULT_DATA_DIR = Path(
@@ -17,18 +23,6 @@ DEFAULT_DATA_DIR = Path(
 DEFAULT_OUTPUT_DIR = Path(
     r"D:\Python\Artificial Intelligence\projects\reinforcement_learning\movielens_1m_sasrec_baseline\artifacts"
 )
-
-
-class SequenceDataset(Dataset):
-    def __init__(self, input_ids: np.ndarray, target_ids: np.ndarray) -> None:
-        self.input_ids = torch.from_numpy(input_ids).long()
-        self.target_ids = torch.from_numpy(target_ids).long()
-
-    def __len__(self) -> int:
-        return int(self.target_ids.shape[0])
-
-    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
-        return self.input_ids[index], self.target_ids[index]
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,13 +45,19 @@ def parse_args() -> argparse.Namespace:
         "--epochs",
         type=int,
         default=10,
-        help="Number of training epochs.",
+        help="Maximum number of training epochs.",
     )
     parser.add_argument(
         "--batch-size",
         type=int,
         default=256,
         help="Training batch size.",
+    )
+    parser.add_argument(
+        "--eval-batch-size",
+        type=int,
+        default=256,
+        help="Validation batch size.",
     )
     parser.add_argument(
         "--learning-rate",
@@ -96,6 +96,19 @@ def parse_args() -> argparse.Namespace:
         help="Dropout rate.",
     )
     parser.add_argument(
+        "--selection-metric",
+        type=str,
+        default="ndcg_at_10",
+        choices=["hr_at_10", "ndcg_at_10"],
+        help="Validation metric used to choose the best checkpoint.",
+    )
+    parser.add_argument(
+        "--early-stop-patience",
+        type=int,
+        default=3,
+        help="Stop if the validation metric does not improve for this many epochs. Set 0 to disable.",
+    )
+    parser.add_argument(
         "--device",
         type=str,
         default="auto",
@@ -111,43 +124,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def resolve_device(device_arg: str) -> torch.device:
-    if device_arg == "cpu":
-        return torch.device("cpu")
-    if device_arg == "cuda":
-        return torch.device("cuda")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
-
-
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-
-
-def load_metadata(data_dir: Path) -> dict:
-    metadata_path = data_dir / "metadata.json"
-    if not metadata_path.exists():
-        raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
-
-    with metadata_path.open("r", encoding="utf-8") as fin:
-        return json.load(fin)
-
-
-def load_training_dataset(data_dir: Path) -> SequenceDataset:
-    train_path = data_dir / "train_sequences.npz"
-    if not train_path.exists():
-        raise FileNotFoundError(f"Training sequences not found: {train_path}")
-
-    data = np.load(train_path)
-    return SequenceDataset(
-        input_ids=data["input_ids"],
-        target_ids=data["target_ids"],
-    )
 
 
 def build_model(args: argparse.Namespace, metadata: dict, device: torch.device) -> SASRec:
@@ -175,7 +157,6 @@ def train_one_epoch(
 
     for input_ids, target_ids in dataloader:
         input_ids = input_ids.to(device)
-        # CrossEntropyLoss expects class indices in [0, num_classes - 1].
         target_ids = target_ids.to(device) - 1
 
         optimizer.zero_grad(set_to_none=True)
@@ -198,6 +179,10 @@ def train_one_epoch(
     }
 
 
+def is_metric_improved(current_value: float, best_value: float) -> bool:
+    return current_value > best_value
+
+
 def main() -> None:
     args = parse_args()
     set_seed(args.seed)
@@ -210,11 +195,18 @@ def main() -> None:
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
     metadata = load_metadata(data_dir)
-    train_dataset = load_training_dataset(data_dir)
-    dataloader = DataLoader(
+    train_dataset = load_sequence_dataset(data_dir, split="train")
+    valid_dataset = load_sequence_dataset(data_dir, split="valid")
+
+    train_dataloader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
+    )
+    valid_dataloader = DataLoader(
+        valid_dataset,
+        batch_size=args.eval_batch_size,
+        shuffle=False,
     )
 
     device = resolve_device(args.device)
@@ -227,49 +219,94 @@ def main() -> None:
     criterion = nn.CrossEntropyLoss()
 
     epoch_metrics: list[dict[str, float]] = []
-    best_loss = float("inf")
+    best_metric_value = float("-inf")
+    best_epoch = 0
+    epochs_without_improvement = 0
+    stopped_early = False
+
     best_checkpoint_path = checkpoints_dir / "sasrec_best.pt"
+    final_checkpoint_path = checkpoints_dir / "sasrec_final.pt"
 
     for epoch_idx in range(1, args.epochs + 1):
-        metrics = train_one_epoch(
+        train_metrics = train_one_epoch(
             model=model,
-            dataloader=dataloader,
+            dataloader=train_dataloader,
             optimizer=optimizer,
             criterion=criterion,
             device=device,
         )
-        metrics["epoch"] = float(epoch_idx)
-        epoch_metrics.append(metrics)
+        valid_metrics = evaluate_ranking_metrics(
+            model=model,
+            dataloader=valid_dataloader,
+            num_items=metadata["kept_item_count"],
+            device=device,
+        )
 
-        if metrics["loss"] < best_loss:
-            best_loss = metrics["loss"]
+        selected_metric_value = float(valid_metrics[args.selection_metric])
+        improved = is_metric_improved(selected_metric_value, best_metric_value)
+        if improved:
+            best_metric_value = selected_metric_value
+            best_epoch = epoch_idx
+            epochs_without_improvement = 0
             torch.save(model.state_dict(), best_checkpoint_path)
+        else:
+            epochs_without_improvement += 1
+
+        epoch_summary = {
+            "epoch": epoch_idx,
+            "train_loss": float(train_metrics["loss"]),
+            "train_accuracy": float(train_metrics["accuracy"]),
+            "valid_hr_at_10": float(valid_metrics["hr_at_10"]),
+            "valid_ndcg_at_10": float(valid_metrics["ndcg_at_10"]),
+            "selection_metric": args.selection_metric,
+            "selection_metric_value": selected_metric_value,
+            "is_best_epoch": improved,
+            "epochs_without_improvement": epochs_without_improvement,
+        }
+        epoch_metrics.append(epoch_summary)
 
         print(
             f"Epoch {epoch_idx}/{args.epochs} - "
-            f"loss={metrics['loss']:.6f} - "
-            f"accuracy={metrics['accuracy']:.6f}"
+            f"train_loss={epoch_summary['train_loss']:.6f} - "
+            f"train_accuracy={epoch_summary['train_accuracy']:.6f} - "
+            f"valid_hr@10={epoch_summary['valid_hr_at_10']:.6f} - "
+            f"valid_ndcg@10={epoch_summary['valid_ndcg_at_10']:.6f}"
         )
 
-    final_checkpoint_path = checkpoints_dir / "sasrec_final.pt"
+        if args.early_stop_patience > 0 and epochs_without_improvement >= args.early_stop_patience:
+            stopped_early = True
+            print(
+                f"Early stopping triggered at epoch {epoch_idx}. "
+                f"No improvement in {args.selection_metric} for "
+                f"{args.early_stop_patience} consecutive epochs."
+            )
+            break
+
     torch.save(model.state_dict(), final_checkpoint_path)
 
     training_summary = {
         "data_dir": str(data_dir),
         "device": str(device),
         "seed": args.seed,
-        "epochs": args.epochs,
+        "epochs_requested": args.epochs,
+        "epochs_completed": len(epoch_metrics),
         "batch_size": args.batch_size,
+        "eval_batch_size": args.eval_batch_size,
         "learning_rate": args.learning_rate,
         "weight_decay": args.weight_decay,
         "embedding_dim": args.embedding_dim,
         "num_heads": args.num_heads,
         "num_blocks": args.num_blocks,
         "dropout": args.dropout,
+        "selection_metric": args.selection_metric,
+        "early_stop_patience": args.early_stop_patience,
+        "stopped_early": stopped_early,
         "train_sample_count": len(train_dataset),
+        "valid_user_count": len(valid_dataset),
         "num_items": metadata["kept_item_count"],
         "max_seq_len": metadata["max_seq_len"],
-        "best_loss": best_loss,
+        "best_epoch": best_epoch,
+        "best_selection_metric_value": best_metric_value,
         "best_checkpoint_path": str(best_checkpoint_path),
         "final_checkpoint_path": str(final_checkpoint_path),
         "epoch_metrics": epoch_metrics,
@@ -280,6 +317,10 @@ def main() -> None:
         json.dump(training_summary, fout, ensure_ascii=False, indent=2)
 
     print("Training finished.")
+    print(
+        f"Best epoch: {best_epoch} - "
+        f"{args.selection_metric}={best_metric_value:.6f}"
+    )
     print(f"Best checkpoint saved to: {best_checkpoint_path}")
     print(f"Final checkpoint saved to: {final_checkpoint_path}")
     print(f"Metrics saved to: {metrics_path}")
