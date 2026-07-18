@@ -33,6 +33,10 @@
   - 按 leave-one-out 协议评估
   - 计算 `HR@10` 与 `NDCG@10`
   - 保存验证或测试指标
+- `src/run_sasrec_experiments.py`
+  - 统一管理多组实验
+  - 自动调用预处理、训练、测试评估
+  - 汇总多组配置的结果到 summary 文件
 
 ## 默认数据路径
 
@@ -68,6 +72,13 @@
 - `artifacts/predictions/valid_metrics.json`
 - `artifacts/predictions/test_metrics.json`
 
+## 多实验产物
+
+- `artifacts/experiments/<run_name>/`
+- `artifacts/experiments/prepared_data/`
+- `artifacts/experiments/summaries/<preset>_summary.json`
+- `artifacts/experiments/summaries/<preset>_summary.csv`
+
 ## 推荐执行顺序
 
 1. 先运行 `preprocess_movielens_1m.py`
@@ -90,4 +101,8 @@ python "D:\Python\Artificial Intelligence\projects\reinforcement_learning\moviel
 
 ```powershell
 & "C:\Users\lenovo\miniconda3\envs\kg_env\python.exe" "D:\Python\Artificial Intelligence\projects\reinforcement_learning\movielens_1m_sasrec_baseline\src\evaluate_sasrec.py"
+```
+
+```powershell
+python "D:\Python\Artificial Intelligence\projects\reinforcement_learning\movielens_1m_sasrec_baseline\src\run_sasrec_experiments.py" --preset baseline_triplet --device cuda
 ```
