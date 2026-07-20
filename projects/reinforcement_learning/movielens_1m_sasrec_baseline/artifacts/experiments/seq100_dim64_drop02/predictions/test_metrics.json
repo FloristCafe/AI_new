@@ -1,0 +1,9 @@
+{
+  "split": "test",
+  "data_dir": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\experiments\\prepared_data\\seq_len_100",
+  "checkpoint_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\experiments\\seq100_dim64_drop02\\checkpoints\\sasrec_best.pt",
+  "device": "cuda",
+  "hr_at_10": 0.10844370860927152,
+  "ndcg_at_10": 0.057762066301615136,
+  "user_count": 6040
+}
