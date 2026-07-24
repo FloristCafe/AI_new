@@ -108,6 +108,48 @@ PRESET_CONFIGS: dict[str, list[ExperimentConfig]] = {
             weight_decay=1e-5,
         ),
     ],
+    "dim128_finegrained_structure": [
+        ExperimentConfig(
+            name="seq50_dim128_drop02",
+            max_seq_len=50,
+            embedding_dim=128,
+            num_heads=2,
+            num_blocks=2,
+            dropout=0.2,
+            learning_rate=1e-3,
+            weight_decay=1e-5,
+        ),
+        ExperimentConfig(
+            name="seq50_dim128_drop03",
+            max_seq_len=50,
+            embedding_dim=128,
+            num_heads=2,
+            num_blocks=2,
+            dropout=0.3,
+            learning_rate=1e-3,
+            weight_decay=1e-5,
+        ),
+        ExperimentConfig(
+            name="seq50_dim128_drop04",
+            max_seq_len=50,
+            embedding_dim=128,
+            num_heads=2,
+            num_blocks=2,
+            dropout=0.4,
+            learning_rate=1e-3,
+            weight_decay=1e-5,
+        ),
+        ExperimentConfig(
+            name="seq50_dim128_blocks3_drop02",
+            max_seq_len=50,
+            embedding_dim=128,
+            num_heads=2,
+            num_blocks=3,
+            dropout=0.2,
+            learning_rate=1e-3,
+            weight_decay=1e-5,
+        ),
+    ],
 }
 
 

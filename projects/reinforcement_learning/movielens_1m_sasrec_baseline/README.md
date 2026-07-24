@@ -37,6 +37,7 @@
   - 统一管理多组实验
   - 自动调用预处理、训练、测试评估
   - 汇总多组配置的结果到 summary 文件
+  - 当前支持 `baseline_triplet`、`capacity_and_regularization`、`dim128_finegrained_structure`
 
 ## 默认数据路径
 
@@ -105,4 +106,8 @@ python "D:\Python\Artificial Intelligence\projects\reinforcement_learning\moviel
 
 ```powershell
 python "D:\Python\Artificial Intelligence\projects\reinforcement_learning\movielens_1m_sasrec_baseline\src\run_sasrec_experiments.py" --preset baseline_triplet --device cuda
+```
+
+```powershell
+python "D:\Python\Artificial Intelligence\projects\reinforcement_learning\movielens_1m_sasrec_baseline\src\run_sasrec_experiments.py" --preset dim128_finegrained_structure --device cuda
 ```
