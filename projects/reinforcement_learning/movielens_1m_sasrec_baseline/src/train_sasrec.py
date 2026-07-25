@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -13,7 +14,9 @@ from sasrec_utils import (
     evaluate_ranking_metrics,
     load_metadata,
     load_sequence_dataset,
+    load_sequence_supervision_dataset,
     resolve_device,
+    sample_uniform_negative_ids,
 )
 
 
@@ -109,6 +112,19 @@ def parse_args() -> argparse.Namespace:
         help="Stop if the validation metric does not improve for this many epochs. Set 0 to disable.",
     )
     parser.add_argument(
+        "--loss-type",
+        type=str,
+        default="cross_entropy",
+        choices=["cross_entropy", "bce_negative_sampling"],
+        help="Training objective. Keep cross_entropy for the existing baseline, or switch to BCE with sampled negatives for paper alignment.",
+    )
+    parser.add_argument(
+        "--num-negative-samples",
+        type=int,
+        default=1,
+        help="Number of sampled negatives per valid sequence position when using BCE training.",
+    )
+    parser.add_argument(
         "--device",
         type=str,
         default="auto",
@@ -143,7 +159,7 @@ def build_model(args: argparse.Namespace, metadata: dict, device: torch.device) 
     ).to(device)
 
 
-def train_one_epoch(
+def train_one_epoch_cross_entropy(
     model: SASRec,
     dataloader: DataLoader,
     optimizer: torch.optim.Optimizer,
@@ -179,6 +195,107 @@ def train_one_epoch(
     }
 
 
+def train_one_epoch_bce_negative_sampling(
+    model: SASRec,
+    dataloader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    num_items: int,
+    num_negative_samples: int,
+) -> dict[str, float]:
+    model.train()
+    loss_sum = 0.0
+    correct_sum = 0
+    position_count = 0
+
+    for input_ids, positive_ids in dataloader:
+        input_ids = input_ids.to(device)
+        positive_ids = positive_ids.to(device)
+        valid_mask = positive_ids.ne(0)
+        valid_positions = int(valid_mask.sum().item())
+        if valid_positions == 0:
+            continue
+
+        negative_ids = sample_uniform_negative_ids(
+            input_ids=input_ids,
+            positive_ids=positive_ids,
+            num_items=num_items,
+            num_negative_samples=num_negative_samples,
+        )
+
+        optimizer.zero_grad(set_to_none=True)
+        hidden_states = model.encode(input_ids)
+        positive_logits = model.score_candidates(hidden_states, positive_ids)
+        negative_logits = model.score_candidates(hidden_states, negative_ids)
+
+        positive_loss = F.binary_cross_entropy_with_logits(
+            positive_logits,
+            torch.ones_like(positive_logits),
+            reduction="none",
+        )
+        if num_negative_samples == 1:
+            negative_loss = F.binary_cross_entropy_with_logits(
+                negative_logits,
+                torch.zeros_like(negative_logits),
+                reduction="none",
+            )
+            comparison = positive_logits > negative_logits
+        else:
+            negative_loss = F.binary_cross_entropy_with_logits(
+                negative_logits,
+                torch.zeros_like(negative_logits),
+                reduction="none",
+            ).mean(dim=-1)
+            comparison = (positive_logits.unsqueeze(-1) > negative_logits).all(dim=-1)
+
+        loss = ((positive_loss + negative_loss) * valid_mask.float()).sum() / valid_positions
+        loss.backward()
+        optimizer.step()
+
+        loss_sum += float(loss.item()) * valid_positions
+        correct_sum += int(comparison[valid_mask].sum().item())
+        position_count += valid_positions
+
+    average_loss = loss_sum / max(position_count, 1)
+    accuracy = correct_sum / max(position_count, 1)
+    return {
+        "loss": float(average_loss),
+        "accuracy": float(accuracy),
+    }
+
+
+def train_one_epoch(
+    model: SASRec,
+    dataloader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    loss_type: str,
+    num_items: int,
+    num_negative_samples: int,
+    criterion: nn.Module | None = None,
+) -> dict[str, float]:
+    if loss_type == "cross_entropy":
+        if criterion is None:
+            raise ValueError("criterion is required for cross_entropy training.")
+        return train_one_epoch_cross_entropy(
+            model=model,
+            dataloader=dataloader,
+            optimizer=optimizer,
+            criterion=criterion,
+            device=device,
+        )
+    if loss_type == "bce_negative_sampling":
+        return train_one_epoch_bce_negative_sampling(
+            model=model,
+            dataloader=dataloader,
+            optimizer=optimizer,
+            device=device,
+            num_items=num_items,
+            num_negative_samples=num_negative_samples,
+        )
+    raise ValueError(f"Unsupported loss type: {loss_type}")
+
+
 def is_metric_improved(current_value: float, best_value: float) -> bool:
     return current_value > best_value
 
@@ -194,8 +311,26 @@ def main() -> None:
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.loss_type == "bce_negative_sampling" and args.num_negative_samples <= 0:
+        raise ValueError("--num-negative-samples must be at least 1.")
+
     metadata = load_metadata(data_dir)
-    train_dataset = load_sequence_dataset(data_dir, split="train")
+    if args.loss_type == "cross_entropy":
+        train_dataset = load_sequence_dataset(data_dir, split="train")
+        train_count_summary = {
+            "train_dataset_size": len(train_dataset),
+            "train_supervision_position_count": len(train_dataset),
+            "train_count_unit": "single_target_samples",
+        }
+    else:
+        train_dataset = load_sequence_supervision_dataset(data_dir)
+        train_count_summary = {
+            "train_dataset_size": len(train_dataset),
+            "train_supervision_position_count": int(
+                metadata.get("train_supervision_position_count", 0)
+            ),
+            "train_count_unit": "sequence_positions",
+        }
     valid_dataset = load_sequence_dataset(data_dir, split="valid")
 
     train_dataloader = DataLoader(
@@ -216,7 +351,7 @@ def main() -> None:
         lr=args.learning_rate,
         weight_decay=args.weight_decay,
     )
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss() if args.loss_type == "cross_entropy" else None
 
     epoch_metrics: list[dict[str, float]] = []
     best_metric_value = float("-inf")
@@ -232,8 +367,11 @@ def main() -> None:
             model=model,
             dataloader=train_dataloader,
             optimizer=optimizer,
-            criterion=criterion,
             device=device,
+            loss_type=args.loss_type,
+            num_items=metadata["kept_item_count"],
+            num_negative_samples=args.num_negative_samples,
+            criterion=criterion,
         )
         valid_metrics = evaluate_ranking_metrics(
             model=model,
@@ -298,10 +436,16 @@ def main() -> None:
         "num_heads": args.num_heads,
         "num_blocks": args.num_blocks,
         "dropout": args.dropout,
+        "loss_type": args.loss_type,
+        "num_negative_samples": args.num_negative_samples,
         "selection_metric": args.selection_metric,
         "early_stop_patience": args.early_stop_patience,
         "stopped_early": stopped_early,
-        "train_sample_count": len(train_dataset),
+        "train_metric_definition": (
+            "next_item_classification_accuracy"
+            if args.loss_type == "cross_entropy"
+            else "positive_logit_greater_than_negative_logit_rate"
+        ),
         "valid_user_count": len(valid_dataset),
         "num_items": metadata["kept_item_count"],
         "max_seq_len": metadata["max_seq_len"],
@@ -311,6 +455,7 @@ def main() -> None:
         "final_checkpoint_path": str(final_checkpoint_path),
         "epoch_metrics": epoch_metrics,
     }
+    training_summary.update(train_count_summary)
 
     metrics_path = metrics_dir / "training_metrics.json"
     with metrics_path.open("w", encoding="utf-8") as fout:

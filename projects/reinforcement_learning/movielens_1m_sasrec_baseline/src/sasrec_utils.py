@@ -20,6 +20,18 @@ class SequenceDataset(Dataset):
         return self.input_ids[index], self.target_ids[index]
 
 
+class SequenceSupervisionDataset(Dataset):
+    def __init__(self, input_ids: np.ndarray, positive_ids: np.ndarray) -> None:
+        self.input_ids = torch.from_numpy(input_ids).long()
+        self.positive_ids = torch.from_numpy(positive_ids).long()
+
+    def __len__(self) -> int:
+        return int(self.input_ids.shape[0])
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.input_ids[index], self.positive_ids[index]
+
+
 def resolve_device(device_arg: str) -> torch.device:
     if device_arg == "cpu":
         return torch.device("cpu")
@@ -49,6 +61,64 @@ def load_sequence_dataset(data_dir: Path, split: str) -> SequenceDataset:
         input_ids=data["input_ids"],
         target_ids=data["target_ids"],
     )
+
+
+def load_sequence_supervision_dataset(data_dir: Path) -> SequenceSupervisionDataset:
+    split_path = data_dir / "train_sequence_supervision.npz"
+    if not split_path.exists():
+        raise FileNotFoundError(
+            "Sequence supervision split not found: "
+            f"{split_path}. Re-run preprocessing to create it."
+        )
+
+    data = np.load(split_path)
+    return SequenceSupervisionDataset(
+        input_ids=data["input_ids"],
+        positive_ids=data["positive_ids"],
+    )
+
+
+def sample_uniform_negative_ids(
+    input_ids: torch.Tensor,
+    positive_ids: torch.Tensor,
+    num_items: int,
+    num_negative_samples: int = 1,
+) -> torch.Tensor:
+    if num_negative_samples <= 0:
+        raise ValueError("num_negative_samples must be at least 1.")
+
+    valid_mask = positive_ids.ne(0)
+    sample_shape = (*positive_ids.shape, num_negative_samples)
+    negative_ids = torch.zeros(sample_shape, dtype=torch.long, device=positive_ids.device)
+    if not valid_mask.any():
+        return negative_ids.squeeze(-1) if num_negative_samples == 1 else negative_ids
+
+    def build_collision_mask(candidate_ids: torch.Tensor) -> torch.Tensor:
+        history_collisions = (
+            candidate_ids.unsqueeze(2)
+            == input_ids.unsqueeze(1).unsqueeze(-1)
+        ).any(dim=2)
+        positive_collisions = candidate_ids.eq(positive_ids.unsqueeze(-1))
+        return (history_collisions | positive_collisions) & valid_mask.unsqueeze(-1)
+
+    negative_ids = torch.randint(
+        low=1,
+        high=num_items + 1,
+        size=sample_shape,
+        device=positive_ids.device,
+    )
+    collision_mask = build_collision_mask(negative_ids)
+    while collision_mask.any():
+        negative_ids[collision_mask] = torch.randint(
+            low=1,
+            high=num_items + 1,
+            size=(int(collision_mask.sum().item()),),
+            device=positive_ids.device,
+        )
+        collision_mask = build_collision_mask(negative_ids)
+
+    negative_ids = negative_ids * valid_mask.unsqueeze(-1).long()
+    return negative_ids.squeeze(-1) if num_negative_samples == 1 else negative_ids
 
 
 def compute_hit_and_ndcg(

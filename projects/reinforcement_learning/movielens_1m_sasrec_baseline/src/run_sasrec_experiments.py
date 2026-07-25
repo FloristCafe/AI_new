@@ -30,6 +30,8 @@ class ExperimentConfig:
     epochs: int = 20
     early_stop_patience: int = 3
     selection_metric: str = "ndcg_at_10"
+    loss_type: str = "cross_entropy"
+    num_negative_samples: int = 1
     seed: int = 42
 
 
@@ -150,6 +152,31 @@ PRESET_CONFIGS: dict[str, list[ExperimentConfig]] = {
             weight_decay=1e-5,
         ),
     ],
+    "objective_alignment": [
+        ExperimentConfig(
+            name="seq50_dim128_blocks3_drop02_ce",
+            max_seq_len=50,
+            embedding_dim=128,
+            num_heads=2,
+            num_blocks=3,
+            dropout=0.2,
+            learning_rate=1e-3,
+            weight_decay=1e-5,
+            loss_type="cross_entropy",
+        ),
+        ExperimentConfig(
+            name="seq50_dim128_blocks3_drop02_bce_ns1",
+            max_seq_len=50,
+            embedding_dim=128,
+            num_heads=2,
+            num_blocks=3,
+            dropout=0.2,
+            learning_rate=1e-3,
+            weight_decay=1e-5,
+            loss_type="bce_negative_sampling",
+            num_negative_samples=1,
+        ),
+    ],
 }
 
 
@@ -228,7 +255,17 @@ def metadata_matches(metadata_path: Path, config: ExperimentConfig) -> bool:
     with metadata_path.open("r", encoding="utf-8") as fin:
         metadata = json.load(fin)
 
-    return int(metadata.get("max_seq_len", -1)) == config.max_seq_len
+    if int(metadata.get("max_seq_len", -1)) != config.max_seq_len:
+        return False
+
+    preprocess_dir = metadata_path.parent
+    required_files = [
+        preprocess_dir / "train_sequences.npz",
+        preprocess_dir / "train_sequence_supervision.npz",
+        preprocess_dir / "valid_sequences.npz",
+        preprocess_dir / "test_sequences.npz",
+    ]
+    return all(path.exists() for path in required_files)
 
 
 def maybe_run_preprocess(
@@ -299,6 +336,10 @@ def maybe_run_training(
         config.selection_metric,
         "--early-stop-patience",
         str(config.early_stop_patience),
+        "--loss-type",
+        config.loss_type,
+        "--num-negative-samples",
+        str(config.num_negative_samples),
         "--device",
         args.device,
         "--seed",
@@ -382,6 +423,8 @@ def build_summary_row(
         "weight_decay": config.weight_decay,
         "batch_size": config.batch_size,
         "epochs_requested": config.epochs,
+        "loss_type": config.loss_type,
+        "num_negative_samples": config.num_negative_samples,
         "epochs_completed": training_metrics["epochs_completed"],
         "stopped_early": training_metrics["stopped_early"],
         "best_epoch": training_metrics["best_epoch"],

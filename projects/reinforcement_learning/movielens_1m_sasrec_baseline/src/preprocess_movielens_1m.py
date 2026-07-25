@@ -178,6 +178,29 @@ def pad_sequence(sequence: list[int], max_seq_len: int) -> np.ndarray:
     return padded
 
 
+def pad_aligned_sequences(
+    input_sequence: list[int],
+    positive_sequence: list[int],
+    max_seq_len: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    if len(input_sequence) != len(positive_sequence):
+        raise ValueError("Input and positive sequences must have the same length.")
+
+    padded_input = np.zeros(max_seq_len, dtype=np.int64)
+    padded_positive = np.zeros(max_seq_len, dtype=np.int64)
+    if not input_sequence:
+        return padded_input, padded_positive
+
+    truncated_input = input_sequence[-max_seq_len:]
+    truncated_positive = positive_sequence[-max_seq_len:]
+    padded_input[-len(truncated_input) :] = np.asarray(truncated_input, dtype=np.int64)
+    padded_positive[-len(truncated_positive) :] = np.asarray(
+        truncated_positive,
+        dtype=np.int64,
+    )
+    return padded_input, padded_positive
+
+
 def build_training_samples(
     user_sequences: dict[int, list[int]],
     max_seq_len: int,
@@ -206,6 +229,48 @@ def build_training_samples(
     return (
         np.stack(input_sequences).astype(np.int64),
         np.asarray(target_items, dtype=np.int64),
+        np.asarray(sample_user_ids, dtype=np.int64),
+    )
+
+
+def build_sequence_training_windows(
+    user_sequences: dict[int, list[int]],
+    max_seq_len: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    input_sequences: list[np.ndarray] = []
+    positive_sequences: list[np.ndarray] = []
+    sample_user_ids: list[int] = []
+
+    for user_id, items in user_sequences.items():
+        train_items = items[:-2]
+        if len(train_items) < 2:
+            continue
+
+        for start_idx in range(0, len(train_items) - 1, max_seq_len):
+            window = train_items[start_idx : start_idx + max_seq_len + 1]
+            if len(window) < 2:
+                continue
+
+            input_sequence = window[:-1]
+            positive_sequence = window[1:]
+            padded_input, padded_positive = pad_aligned_sequences(
+                input_sequence=input_sequence,
+                positive_sequence=positive_sequence,
+                max_seq_len=max_seq_len,
+            )
+            input_sequences.append(padded_input)
+            positive_sequences.append(padded_positive)
+            sample_user_ids.append(user_id)
+
+    if not input_sequences:
+        raise ValueError(
+            "No sequence-level training windows were created. "
+            "Check the interaction thresholds."
+        )
+
+    return (
+        np.stack(input_sequences).astype(np.int64),
+        np.stack(positive_sequences).astype(np.int64),
         np.asarray(sample_user_ids, dtype=np.int64),
     )
 
@@ -254,6 +319,20 @@ def save_npz(
     )
 
 
+def save_sequence_supervision_npz(
+    path: Path,
+    input_ids: np.ndarray,
+    positive_ids: np.ndarray,
+    user_ids: np.ndarray,
+) -> None:
+    np.savez_compressed(
+        path,
+        input_ids=input_ids,
+        positive_ids=positive_ids,
+        user_ids=user_ids,
+    )
+
+
 def save_mapping_csv(path: Path, header: tuple[str, str], mapping: dict[int, int]) -> None:
     with path.open("w", encoding="utf-8", newline="") as fout:
         writer = csv.writer(fout)
@@ -290,6 +369,14 @@ def main() -> None:
         user_sequences=remapped_sequences,
         max_seq_len=args.max_seq_len,
     )
+    (
+        train_sequence_input_ids,
+        train_sequence_positive_ids,
+        train_sequence_user_ids,
+    ) = build_sequence_training_windows(
+        user_sequences=remapped_sequences,
+        max_seq_len=args.max_seq_len,
+    )
     valid_input_ids, valid_target_ids, valid_user_ids = build_eval_split(
         user_sequences=remapped_sequences,
         max_seq_len=args.max_seq_len,
@@ -302,6 +389,7 @@ def main() -> None:
     )
 
     train_path = output_dir / "train_sequences.npz"
+    train_sequence_supervision_path = output_dir / "train_sequence_supervision.npz"
     valid_path = output_dir / "valid_sequences.npz"
     test_path = output_dir / "test_sequences.npz"
     metadata_path = output_dir / "metadata.json"
@@ -309,6 +397,12 @@ def main() -> None:
     item_mapping_path = output_dir / "item_id_mapping.csv"
 
     save_npz(train_path, train_input_ids, train_target_ids, train_user_ids)
+    save_sequence_supervision_npz(
+        train_sequence_supervision_path,
+        train_sequence_input_ids,
+        train_sequence_positive_ids,
+        train_sequence_user_ids,
+    )
     save_npz(valid_path, valid_input_ids, valid_target_ids, valid_user_ids)
     save_npz(test_path, test_input_ids, test_target_ids, test_user_ids)
     save_mapping_csv(user_mapping_path, ("raw_user_id", "mapped_user_id"), user_mapping)
@@ -327,11 +421,16 @@ def main() -> None:
         "kept_user_count": len(remapped_sequences),
         "kept_item_count": len(item_mapping),
         "train_sample_count": int(len(train_target_ids)),
+        "train_sequence_window_count": int(len(train_sequence_user_ids)),
+        "train_supervision_position_count": int(
+            np.count_nonzero(train_sequence_positive_ids)
+        ),
         "valid_user_count": int(len(valid_target_ids)),
         "test_user_count": int(len(test_target_ids)),
         "filter_stats": filter_stats,
         "artifacts": {
             "train_sequences": str(train_path),
+            "train_sequence_supervision": str(train_sequence_supervision_path),
             "valid_sequences": str(valid_path),
             "test_sequences": str(test_path),
             "user_mapping": str(user_mapping_path),

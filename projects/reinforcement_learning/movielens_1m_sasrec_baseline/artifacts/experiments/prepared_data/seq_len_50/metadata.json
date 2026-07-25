@@ -11,6 +11,8 @@
   "kept_user_count": 6040,
   "kept_item_count": 3706,
   "train_sample_count": 982089,
+  "train_sequence_window_count": 22546,
+  "train_supervision_position_count": 982089,
   "valid_user_count": 6040,
   "test_user_count": 6040,
   "filter_stats": {
@@ -20,6 +22,7 @@
   },
   "artifacts": {
     "train_sequences": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\experiments\\prepared_data\\seq_len_50\\train_sequences.npz",
+    "train_sequence_supervision": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\experiments\\prepared_data\\seq_len_50\\train_sequence_supervision.npz",
     "valid_sequences": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\experiments\\prepared_data\\seq_len_50\\valid_sequences.npz",
     "test_sequences": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\experiments\\prepared_data\\seq_len_50\\test_sequences.npz",
     "user_mapping": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\experiments\\prepared_data\\seq_len_50\\user_id_mapping.csv",

@@ -80,7 +80,13 @@ class SASRec(nn.Module):
         candidate_item_ids: torch.Tensor,
     ) -> torch.Tensor:
         candidate_embeddings = self.item_embedding(candidate_item_ids)
-        return torch.sum(hidden_states.unsqueeze(1) * candidate_embeddings, dim=-1)
+        if hidden_states.dim() == candidate_embeddings.dim():
+            return torch.sum(hidden_states * candidate_embeddings, dim=-1)
+        if hidden_states.dim() + 1 == candidate_embeddings.dim():
+            return torch.sum(hidden_states.unsqueeze(-2) * candidate_embeddings, dim=-1)
+        raise ValueError(
+            "Hidden states and candidate item ids have incompatible shapes for scoring."
+        )
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         last_hidden_state = self.get_last_hidden_state(input_ids)
