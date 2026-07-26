@@ -93,10 +93,18 @@ def sample_uniform_negative_ids(
     if not valid_mask.any():
         return negative_ids.squeeze(-1) if num_negative_samples == 1 else negative_ids
 
+    seq_len = input_ids.size(1)
+    prefix_mask = torch.tril(
+        torch.ones(seq_len, seq_len, dtype=torch.bool, device=input_ids.device)
+    )
+
     def build_collision_mask(candidate_ids: torch.Tensor) -> torch.Tensor:
         history_collisions = (
             candidate_ids.unsqueeze(2)
             == input_ids.unsqueeze(1).unsqueeze(-1)
+        )
+        history_collisions = (
+            history_collisions & prefix_mask.unsqueeze(0).unsqueeze(-1)
         ).any(dim=2)
         positive_collisions = candidate_ids.eq(positive_ids.unsqueeze(-1))
         return (history_collisions | positive_collisions) & valid_mask.unsqueeze(-1)
