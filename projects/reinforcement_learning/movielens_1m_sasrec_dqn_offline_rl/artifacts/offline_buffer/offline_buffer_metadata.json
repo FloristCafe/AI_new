@@ -1,0 +1,103 @@
+{
+  "project": "movielens_1m_sasrec_dqn_offline_rl",
+  "input_paths": {
+    "interactions": "D:\\Python\\Datasets\\movielens_1m\\processed\\interactions.csv",
+    "user_mapping": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed\\user_id_mapping.csv",
+    "item_mapping": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed\\item_id_mapping.csv",
+    "movies": "D:\\Python\\Datasets\\movielens_1m\\raw_extracted\\ml-1m\\movies.dat"
+  },
+  "output_dir": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\offline_buffer",
+  "max_seq_len": 50,
+  "sample_user_limit": 0,
+  "kept_user_count": 6040,
+  "kept_item_count": 3706,
+  "reward_definition": {
+    "exact_hit_reward": 1.0,
+    "genre_match_reward": 0.1,
+    "mismatch_reward": -0.1
+  },
+  "logged_action_note": "Offline buffer stores logged next-click actions. Under this logged-action setup, the immediate reward values in the buffer are all exact-hit rewards (+1.0). Genre-based rewards remain relevant for later counterfactual evaluation when the agent chooses actions other than the logged next click.",
+  "storage_dtypes": {
+    "states": "<class 'numpy.uint16'>",
+    "actions": "<class 'numpy.uint16'>",
+    "next_states": "<class 'numpy.uint16'>",
+    "user_ids": "<class 'numpy.uint16'>",
+    "step_indices": "<class 'numpy.uint16'>",
+    "rewards": "float32",
+    "dones": "bool"
+  },
+  "splits": {
+    "train": {
+      "split": "train",
+      "transition_count": 982089,
+      "state_shape": [
+        982089,
+        50
+      ],
+      "next_state_shape": [
+        982089,
+        50
+      ],
+      "reward_min": 1.0,
+      "reward_max": 1.0,
+      "reward_mean": 1.0,
+      "done_count": 6040,
+      "user_count": 6040,
+      "artifact_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\offline_buffer\\train_replay_buffer.npz"
+    },
+    "valid": {
+      "split": "valid",
+      "transition_count": 6040,
+      "state_shape": [
+        6040,
+        50
+      ],
+      "next_state_shape": [
+        6040,
+        50
+      ],
+      "reward_min": 1.0,
+      "reward_max": 1.0,
+      "reward_mean": 1.0,
+      "done_count": 6040,
+      "user_count": 6040,
+      "artifact_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\offline_buffer\\valid_replay_buffer.npz"
+    },
+    "test": {
+      "split": "test",
+      "transition_count": 6040,
+      "state_shape": [
+        6040,
+        50
+      ],
+      "next_state_shape": [
+        6040,
+        50
+      ],
+      "reward_min": 1.0,
+      "reward_max": 1.0,
+      "reward_mean": 1.0,
+      "done_count": 6040,
+      "user_count": 6040,
+      "artifact_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\offline_buffer\\test_replay_buffer.npz"
+    },
+    "all": {
+      "split": "all",
+      "transition_count": 994169,
+      "state_shape": [
+        994169,
+        50
+      ],
+      "next_state_shape": [
+        994169,
+        50
+      ],
+      "reward_min": 1.0,
+      "reward_max": 1.0,
+      "reward_mean": 1.0,
+      "done_count": 6040,
+      "user_count": 6040,
+      "artifact_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\offline_buffer\\all_replay_buffer.npz"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "split": "all",
+  "offline_buffer_dir": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\debug\\smoke_offline_buffer",
+  "checkpoint_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\debug\\smoke_training_run_4\\checkpoints\\sasrec_dqn_best.pt",
+  "device": "cpu",
+  "topk": 10,
+  "hr_at_k": 0.029082774049217,
+  "ndcg_at_k": 0.015477061992136186,
+  "step_count": 447,
+  "user_count": 5,
+  "top1_average_reward": -0.011633109619686771,
+  "top1_exact_hit_rate": 0.006711409395973154,
+  "top1_genre_match_rate": 0.40492170022371365,
+  "mean_cumulative_reward_per_user": -1.0399999999999991,
+  "min_cumulative_reward_per_user": -5.799999999999995,
+  "max_cumulative_reward_per_user": 1.6000000000000003,
+  "mean_episode_length": 89.4
+}
