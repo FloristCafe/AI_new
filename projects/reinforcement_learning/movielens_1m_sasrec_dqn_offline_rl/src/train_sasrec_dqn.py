@@ -136,6 +136,24 @@ def parse_args() -> argparse.Namespace:
         help="Print training diagnostics every N optimization steps.",
     )
     parser.add_argument(
+        "--grad-clip-norm",
+        type=float,
+        default=1.0,
+        help="Gradient clipping norm. Set 0 to disable clipping.",
+    )
+    parser.add_argument(
+        "--q-warning-threshold",
+        type=float,
+        default=100.0,
+        help="Print a warning when batch max Q-value exceeds this threshold. Set 0 to disable warnings.",
+    )
+    parser.add_argument(
+        "--q-stop-threshold",
+        type=float,
+        default=0.0,
+        help="Stop training early when batch max Q-value exceeds this threshold. Set 0 to disable hard stopping.",
+    )
+    parser.add_argument(
         "--selection-metric",
         type=str,
         default="valid_total_loss",
@@ -359,6 +377,8 @@ def main() -> None:
     best_epoch = 0
     global_step = 0
     epoch_metrics: list[dict[str, float]] = []
+    stopped_early = False
+    stop_reason = ""
 
     best_checkpoint_path = checkpoints_dir / "sasrec_dqn_best.pt"
     final_checkpoint_path = checkpoints_dir / "sasrec_dqn_final.pt"
@@ -374,7 +394,9 @@ def main() -> None:
             "train_max_q_value": 0.0,
             "train_mean_current_q": 0.0,
             "train_mean_target_q": 0.0,
+            "train_grad_norm": 0.0,
         }
+        should_break_training = False
 
         for batch in train_dataloader:
             losses = compute_batch_losses(
@@ -386,8 +408,29 @@ def main() -> None:
                 device=device,
             )
 
+            finite_values = {
+                key: torch.isfinite(value).all().item()
+                for key, value in losses.items()
+            }
+            if not all(finite_values.values()):
+                stopped_early = True
+                stop_reason = (
+                    f"Non-finite values detected at epoch {epoch_idx}, "
+                    f"step {global_step + 1}: {finite_values}"
+                )
+                print(f"Stopping early. {stop_reason}")
+                should_break_training = True
+                break
+
             optimizer.zero_grad(set_to_none=True)
             losses["total_loss"].backward()
+            if args.grad_clip_norm > 0:
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    online_model.parameters(),
+                    max_norm=args.grad_clip_norm,
+                )
+            else:
+                grad_norm = torch.zeros((), device=device)
             optimizer.step()
 
             batch_size = batch[0].size(0)
@@ -399,10 +442,30 @@ def main() -> None:
             epoch_sums["train_max_q_value"] += float(losses["max_q_value"].item()) * batch_size
             epoch_sums["train_mean_current_q"] += float(losses["mean_current_q"].item()) * batch_size
             epoch_sums["train_mean_target_q"] += float(losses["mean_target_q"].item()) * batch_size
+            epoch_sums["train_grad_norm"] += float(grad_norm.item()) * batch_size
 
             global_step += 1
             if global_step % args.target_update_interval == 0:
                 target_model.load_state_dict(online_model.state_dict())
+
+            current_max_q_value = float(losses["max_q_value"].item())
+            if args.q_warning_threshold > 0 and current_max_q_value > args.q_warning_threshold:
+                print(
+                    f"Q warning at step {global_step}: "
+                    f"max_q={current_max_q_value:.6f} exceeded "
+                    f"warning threshold {args.q_warning_threshold:.6f}"
+                )
+
+            if args.q_stop_threshold > 0 and current_max_q_value > args.q_stop_threshold:
+                stopped_early = True
+                stop_reason = (
+                    f"Batch max Q-value {current_max_q_value:.6f} exceeded "
+                    f"stop threshold {args.q_stop_threshold:.6f} at "
+                    f"epoch {epoch_idx}, step {global_step}"
+                )
+                print(f"Stopping early. {stop_reason}")
+                should_break_training = True
+                break
 
             if global_step % args.log_interval == 0:
                 print(
@@ -411,10 +474,14 @@ def main() -> None:
                     f"td_loss={losses['td_loss'].item():.6f} - "
                     f"cql_penalty={losses['cql_penalty'].item():.6f} - "
                     f"mean_q={losses['mean_q_value'].item():.6f} - "
-                    f"max_q={losses['max_q_value'].item():.6f}"
+                    f"max_q={losses['max_q_value'].item():.6f} - "
+                    f"grad_norm={float(grad_norm.item()):.6f}"
                 )
 
-        if global_step % args.target_update_interval != 0:
+        if should_break_training:
+            break
+
+        if global_step > 0 and global_step % args.target_update_interval != 0:
             target_model.load_state_dict(online_model.state_dict())
 
         train_metrics = {
@@ -429,6 +496,9 @@ def main() -> None:
             cql_alpha=args.cql_alpha,
             device=device,
         )
+
+        if should_break_training:
+            break
 
         selection_metric_value = float(valid_metrics[args.selection_metric])
         is_best_epoch = should_improve(
@@ -456,6 +526,7 @@ def main() -> None:
             f"train_total_loss={epoch_summary['train_total_loss']:.6f} - "
             f"train_td_loss={epoch_summary['train_td_loss']:.6f} - "
             f"train_cql_penalty={epoch_summary['train_cql_penalty']:.6f} - "
+            f"train_grad_norm={epoch_summary['train_grad_norm']:.6f} - "
             f"valid_total_loss={epoch_summary['valid_total_loss']:.6f} - "
             f"valid_td_loss={epoch_summary['valid_td_loss']:.6f} - "
             f"valid_cql_penalty={epoch_summary['valid_cql_penalty']:.6f} - "
@@ -480,12 +551,17 @@ def main() -> None:
         "cql_alpha": args.cql_alpha,
         "target_update_interval": args.target_update_interval,
         "log_interval": args.log_interval,
+        "grad_clip_norm": args.grad_clip_norm,
+        "q_warning_threshold": args.q_warning_threshold,
+        "q_stop_threshold": args.q_stop_threshold,
         "selection_metric": args.selection_metric,
         "num_items": int(metadata["kept_item_count"]),
         "max_seq_len": int(metadata["max_seq_len"]),
         "train_transition_count": len(train_dataset),
         "valid_transition_count": len(valid_dataset),
         "encoder_frozen": args.encoder_learning_rate <= 0.0,
+        "stopped_early": stopped_early,
+        "stop_reason": stop_reason,
         "sasrec_checkpoint_path": str(Path(args.sasrec_checkpoint_path)),
         "best_epoch": best_epoch,
         "best_selection_metric_value": best_metric_value,
