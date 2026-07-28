@@ -1,0 +1,18 @@
+{
+  "split": "all",
+  "offline_buffer_dir": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\offline_buffer",
+  "checkpoint_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\experiments\\cql_stabilized_full_2026_07_28\\checkpoints\\sasrec_dqn_best.pt",
+  "device": "cuda",
+  "topk": 10,
+  "hr_at_k": 0.23001421287527574,
+  "ndcg_at_k": 0.12420156449425275,
+  "step_count": 994169,
+  "user_count": 6040,
+  "top1_average_reward": 0.08796039707566615,
+  "top1_exact_hit_rate": 0.045974074830335686,
+  "top1_genre_match_rate": 0.6869445738098855,
+  "mean_cumulative_reward_per_user": 14.478062913907255,
+  "min_cumulative_reward_per_user": -10.999999999999979,
+  "max_cumulative_reward_per_user": 215.69999999999425,
+  "mean_episode_length": 164.5975165562914
+}
