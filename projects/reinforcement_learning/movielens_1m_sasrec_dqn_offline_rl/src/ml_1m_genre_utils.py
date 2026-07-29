@@ -67,14 +67,12 @@ def compute_recommendation_reward(
     target_item_id: int,
     mapped_movie_genres: dict[int, set[str]],
     exact_hit_reward: float = 1.0,
-    genre_match_reward: float = 0.1,
-    mismatch_reward: float = -0.1,
+    genre_match_reward: float = 0.0,
+    mismatch_reward: float = 0.0,
 ) -> float:
+    del mapped_movie_genres
+    del genre_match_reward
+    del mismatch_reward
     if recommended_item_id == target_item_id:
         return exact_hit_reward
-
-    recommended_genres = mapped_movie_genres.get(recommended_item_id, set())
-    target_genres = mapped_movie_genres.get(target_item_id, set())
-    if recommended_genres & target_genres:
-        return genre_match_reward
-    return mismatch_reward
+    return 0.0

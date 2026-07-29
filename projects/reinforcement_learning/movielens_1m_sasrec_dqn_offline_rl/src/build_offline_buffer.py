@@ -403,15 +403,15 @@ def main() -> None:
         "kept_item_count": len(item_mapping),
         "reward_definition": {
             "exact_hit_reward": 1.0,
-            "genre_match_reward": 0.1,
-            "mismatch_reward": -0.1,
+            "genre_match_reward": 0.0,
+            "mismatch_reward": 0.0,
         },
         "logged_action_note": (
             "Offline buffer stores logged next-click actions. "
             "Under this logged-action setup, the immediate reward values in the "
-            "buffer are all exact-hit rewards (+1.0). Genre-based rewards remain "
-            "relevant for later counterfactual evaluation when the agent chooses "
-            "actions other than the logged next click."
+            "buffer are all exact-hit rewards (+1.0). The project currently uses "
+            "binary rewards for both training and evaluation: exact hit = 1.0, "
+            "otherwise = 0.0."
         ),
         "storage_dtypes": {
             "states": str(STATE_DTYPE),

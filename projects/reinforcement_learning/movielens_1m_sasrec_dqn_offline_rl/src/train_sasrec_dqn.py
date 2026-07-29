@@ -96,13 +96,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--q-head-learning-rate",
         type=float,
-        default=1e-3,
+        default=3e-4,
         help="Learning rate for the DQN head.",
     )
     parser.add_argument(
         "--encoder-learning-rate",
         type=float,
-        default=0.0,
+        default=1e-6,
         help="Learning rate for the SASRec encoder. Set 0 to freeze the encoder.",
     )
     parser.add_argument(
@@ -114,20 +114,57 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gamma",
         type=float,
-        default=0.99,
+        default=0.7,
         help="Discount factor.",
     )
     parser.add_argument(
         "--cql-alpha",
         type=float,
-        default=0.5,
-        help="Weight of the CQL conservative penalty.",
+        default=1.0,
+        help="Initial weight of the CQL conservative penalty.",
     )
     parser.add_argument(
-        "--target-update-interval",
-        type=int,
-        default=200,
-        help="Hard target network sync interval measured in optimization steps.",
+        "--target-tau",
+        type=float,
+        default=0.005,
+        help="Polyak soft-update coefficient for the target network.",
+    )
+    parser.add_argument(
+        "--adaptive-cql-alpha",
+        dest="adaptive_cql_alpha",
+        action="store_true",
+        help="Adapt CQL alpha online so the weighted CQL penalty stays close to the TD scale.",
+    )
+    parser.add_argument(
+        "--disable-adaptive-cql-alpha",
+        dest="adaptive_cql_alpha",
+        action="store_false",
+        help="Disable online CQL alpha adaptation.",
+    )
+    parser.set_defaults(adaptive_cql_alpha=True)
+    parser.add_argument(
+        "--target-cql-ratio",
+        type=float,
+        default=1.1,
+        help="Target ratio for weighted CQL penalty divided by TD loss.",
+    )
+    parser.add_argument(
+        "--alpha-adaptation-rate",
+        type=float,
+        default=0.05,
+        help="Step size used when adapting CQL alpha.",
+    )
+    parser.add_argument(
+        "--min-cql-alpha",
+        type=float,
+        default=0.05,
+        help="Lower bound for adaptive CQL alpha.",
+    )
+    parser.add_argument(
+        "--max-cql-alpha",
+        type=float,
+        default=5.0,
+        help="Upper bound for adaptive CQL alpha.",
     )
     parser.add_argument(
         "--log-interval",
@@ -156,9 +193,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--selection-metric",
         type=str,
-        default="valid_total_loss",
-        choices=["valid_total_loss", "valid_td_loss", "valid_cql_penalty"],
+        default="valid_ndcg_at_10",
+        choices=[
+            "valid_total_loss",
+            "valid_td_loss",
+            "valid_cql_penalty",
+            "valid_hr_at_10",
+            "valid_ndcg_at_10",
+        ],
         help="Validation metric used to pick the best checkpoint.",
+    )
+    parser.add_argument(
+        "--ranking-topk",
+        type=int,
+        default=10,
+        help="Top-k used for validation ranking metrics.",
     )
     parser.add_argument(
         "--device",
@@ -244,6 +293,35 @@ def build_optimizer(model: SASRecDQN, args: argparse.Namespace) -> torch.optim.O
     return torch.optim.Adam(param_groups)
 
 
+def soft_update_target_network(
+    online_model: SASRecDQN,
+    target_model: SASRecDQN,
+    tau: float,
+) -> None:
+    with torch.no_grad():
+        for target_param, online_param in zip(
+            target_model.parameters(),
+            online_model.parameters(),
+        ):
+            target_param.mul_(1.0 - tau).add_(online_param, alpha=tau)
+
+
+def adapt_cql_alpha(
+    current_alpha: float,
+    td_loss: torch.Tensor,
+    cql_penalty: torch.Tensor,
+    target_ratio: float,
+    adaptation_rate: float,
+    min_alpha: float,
+    max_alpha: float,
+) -> float:
+    td_scale = max(float(td_loss.detach().item()), 1e-8)
+    cql_scale = max(float(cql_penalty.detach().item()), 1e-8)
+    effective_ratio = (current_alpha * cql_scale) / td_scale
+    updated_alpha = current_alpha * np.exp(adaptation_rate * (target_ratio - effective_ratio))
+    return float(np.clip(updated_alpha, min_alpha, max_alpha))
+
+
 def compute_batch_losses(
     online_model: SASRecDQN,
     target_model: SASRecDQN,
@@ -269,20 +347,71 @@ def compute_batch_losses(
         next_q = target_next_q_values.gather(dim=1, index=best_next_action_indices).squeeze(1)
         target_q = rewards + gamma * (1.0 - dones) * next_q
 
-    td_loss = F.mse_loss(current_q, target_q)
+    td_loss = F.smooth_l1_loss(current_q, target_q)
     cql_logsumexp = torch.logsumexp(q_values, dim=1)
     cql_penalty = (cql_logsumexp - current_q).mean()
     total_loss = td_loss + cql_alpha * cql_penalty
+    ratio_denominator = td_loss.detach().abs().clamp_min(1e-8)
+    raw_cql_to_td_ratio = cql_penalty.detach() / ratio_denominator
+    effective_cql_to_td_ratio = (cql_alpha * cql_penalty.detach()) / ratio_denominator
 
     return {
         "total_loss": total_loss,
         "td_loss": td_loss,
         "cql_penalty": cql_penalty,
+        "raw_cql_to_td_ratio": raw_cql_to_td_ratio,
+        "effective_cql_to_td_ratio": effective_cql_to_td_ratio,
         "mean_q_value": q_values.mean(),
         "max_q_value": q_values.max(),
         "mean_current_q": current_q.mean(),
         "mean_target_q": target_q.mean(),
     }
+
+
+def mask_seen_items_for_ranking(
+    q_values: torch.Tensor,
+    states: torch.Tensor,
+    target_actions: torch.Tensor,
+) -> torch.Tensor:
+    masked_q_values = q_values.clone()
+    history_mask = torch.zeros_like(masked_q_values, dtype=torch.bool)
+    valid_positions = states.ne(0)
+
+    if valid_positions.any():
+        row_indices = (
+            torch.arange(states.size(0), device=states.device)
+            .unsqueeze(1)
+            .expand_as(states)
+        )
+        history_rows = row_indices[valid_positions]
+        history_cols = states[valid_positions] - 1
+        history_mask[history_rows, history_cols] = True
+
+    target_indices = target_actions.long() - 1
+    batch_indices = torch.arange(states.size(0), device=states.device)
+    history_mask[batch_indices, target_indices] = False
+    return masked_q_values.masked_fill(history_mask, float("-inf"))
+
+
+def compute_hit_and_ndcg_at_k(
+    topk_indices: torch.Tensor,
+    target_indices: torch.Tensor,
+) -> tuple[float, float]:
+    hits = 0.0
+    ndcg = 0.0
+
+    for row_idx in range(topk_indices.size(0)):
+        matches = torch.nonzero(
+            topk_indices[row_idx] == target_indices[row_idx],
+            as_tuple=False,
+        )
+        if matches.numel() > 0:
+            rank = int(matches[0, 0].item())
+            hits += 1.0
+            ndcg += 1.0 / np.log2(rank + 2.0)
+
+    batch_size = max(topk_indices.size(0), 1)
+    return hits / batch_size, ndcg / batch_size
 
 
 def run_validation(
@@ -292,12 +421,18 @@ def run_validation(
     gamma: float,
     cql_alpha: float,
     device: torch.device,
+    ranking_topk: int,
+    num_items: int,
 ) -> dict[str, float]:
     total_examples = 0
     metric_sums = {
         "valid_total_loss": 0.0,
         "valid_td_loss": 0.0,
         "valid_cql_penalty": 0.0,
+        "valid_hr_at_10": 0.0,
+        "valid_ndcg_at_10": 0.0,
+        "valid_raw_cql_to_td_ratio": 0.0,
+        "valid_effective_cql_to_td_ratio": 0.0,
         "valid_mean_q_value": 0.0,
         "valid_max_q_value": 0.0,
         "valid_mean_current_q": 0.0,
@@ -316,11 +451,30 @@ def run_validation(
                 cql_alpha=cql_alpha,
                 device=device,
             )
+            states, actions, _, _, _ = batch
+            states = states.to(device)
+            actions = actions.to(device)
+            q_values = online_model.get_q_values(states)
+            masked_q_values = mask_seen_items_for_ranking(q_values, states, actions)
+            topk_indices = torch.topk(
+                masked_q_values,
+                k=min(ranking_topk, num_items),
+                dim=1,
+            ).indices
+            target_indices = actions.long() - 1
+            hr_batch, ndcg_batch = compute_hit_and_ndcg_at_k(topk_indices, target_indices)
+
             batch_size = batch[0].size(0)
             total_examples += batch_size
             metric_sums["valid_total_loss"] += float(losses["total_loss"].item()) * batch_size
             metric_sums["valid_td_loss"] += float(losses["td_loss"].item()) * batch_size
             metric_sums["valid_cql_penalty"] += float(losses["cql_penalty"].item()) * batch_size
+            metric_sums["valid_hr_at_10"] += hr_batch * batch_size
+            metric_sums["valid_ndcg_at_10"] += ndcg_batch * batch_size
+            metric_sums["valid_raw_cql_to_td_ratio"] += float(losses["raw_cql_to_td_ratio"].item()) * batch_size
+            metric_sums["valid_effective_cql_to_td_ratio"] += float(
+                losses["effective_cql_to_td_ratio"].item()
+            ) * batch_size
             metric_sums["valid_mean_q_value"] += float(losses["mean_q_value"].item()) * batch_size
             metric_sums["valid_max_q_value"] += float(losses["max_q_value"].item()) * batch_size
             metric_sums["valid_mean_current_q"] += float(losses["mean_current_q"].item()) * batch_size
@@ -335,6 +489,8 @@ def run_validation(
 def should_improve(metric_name: str, current_value: float, best_value: float) -> bool:
     if metric_name in {"valid_total_loss", "valid_td_loss", "valid_cql_penalty"}:
         return current_value < best_value
+    if metric_name in {"valid_hr_at_10", "valid_ndcg_at_10"}:
+        return current_value > best_value
     raise ValueError(f"Unsupported selection metric: {metric_name}")
 
 
@@ -372,8 +528,12 @@ def main() -> None:
         parameter.requires_grad = False
 
     optimizer = build_optimizer(online_model, args)
+    current_cql_alpha = float(args.cql_alpha)
 
-    best_metric_value = float("inf")
+    if args.selection_metric in {"valid_hr_at_10", "valid_ndcg_at_10"}:
+        best_metric_value = float("-inf")
+    else:
+        best_metric_value = float("inf")
     best_epoch = 0
     global_step = 0
     epoch_metrics: list[dict[str, float]] = []
@@ -390,11 +550,14 @@ def main() -> None:
             "train_total_loss": 0.0,
             "train_td_loss": 0.0,
             "train_cql_penalty": 0.0,
+            "train_raw_cql_to_td_ratio": 0.0,
+            "train_effective_cql_to_td_ratio": 0.0,
             "train_mean_q_value": 0.0,
             "train_max_q_value": 0.0,
             "train_mean_current_q": 0.0,
             "train_mean_target_q": 0.0,
             "train_grad_norm": 0.0,
+            "train_cql_alpha": 0.0,
         }
         should_break_training = False
 
@@ -404,7 +567,7 @@ def main() -> None:
                 target_model=target_model,
                 batch=batch,
                 gamma=args.gamma,
-                cql_alpha=args.cql_alpha,
+                cql_alpha=current_cql_alpha,
                 device=device,
             )
 
@@ -438,15 +601,34 @@ def main() -> None:
             epoch_sums["train_total_loss"] += float(losses["total_loss"].item()) * batch_size
             epoch_sums["train_td_loss"] += float(losses["td_loss"].item()) * batch_size
             epoch_sums["train_cql_penalty"] += float(losses["cql_penalty"].item()) * batch_size
+            epoch_sums["train_raw_cql_to_td_ratio"] += float(losses["raw_cql_to_td_ratio"].item()) * batch_size
+            epoch_sums["train_effective_cql_to_td_ratio"] += float(
+                losses["effective_cql_to_td_ratio"].item()
+            ) * batch_size
             epoch_sums["train_mean_q_value"] += float(losses["mean_q_value"].item()) * batch_size
             epoch_sums["train_max_q_value"] += float(losses["max_q_value"].item()) * batch_size
             epoch_sums["train_mean_current_q"] += float(losses["mean_current_q"].item()) * batch_size
             epoch_sums["train_mean_target_q"] += float(losses["mean_target_q"].item()) * batch_size
             epoch_sums["train_grad_norm"] += float(grad_norm.item()) * batch_size
+            epoch_sums["train_cql_alpha"] += current_cql_alpha * batch_size
 
             global_step += 1
-            if global_step % args.target_update_interval == 0:
-                target_model.load_state_dict(online_model.state_dict())
+            soft_update_target_network(
+                online_model=online_model,
+                target_model=target_model,
+                tau=args.target_tau,
+            )
+
+            if args.adaptive_cql_alpha:
+                current_cql_alpha = adapt_cql_alpha(
+                    current_alpha=current_cql_alpha,
+                    td_loss=losses["td_loss"],
+                    cql_penalty=losses["cql_penalty"],
+                    target_ratio=args.target_cql_ratio,
+                    adaptation_rate=args.alpha_adaptation_rate,
+                    min_alpha=args.min_cql_alpha,
+                    max_alpha=args.max_cql_alpha,
+                )
 
             current_max_q_value = float(losses["max_q_value"].item())
             if args.q_warning_threshold > 0 and current_max_q_value > args.q_warning_threshold:
@@ -473,6 +655,8 @@ def main() -> None:
                     f"total_loss={losses['total_loss'].item():.6f} - "
                     f"td_loss={losses['td_loss'].item():.6f} - "
                     f"cql_penalty={losses['cql_penalty'].item():.6f} - "
+                    f"effective_cql_to_td_ratio={losses['effective_cql_to_td_ratio'].item():.6f} - "
+                    f"cql_alpha={current_cql_alpha:.6f} - "
                     f"mean_q={losses['mean_q_value'].item():.6f} - "
                     f"max_q={losses['max_q_value'].item():.6f} - "
                     f"grad_norm={float(grad_norm.item()):.6f}"
@@ -480,9 +664,6 @@ def main() -> None:
 
         if should_break_training:
             break
-
-        if global_step > 0 and global_step % args.target_update_interval != 0:
-            target_model.load_state_dict(online_model.state_dict())
 
         train_metrics = {
             key: value / max(epoch_example_count, 1)
@@ -493,8 +674,10 @@ def main() -> None:
             target_model=target_model,
             dataloader=valid_dataloader,
             gamma=args.gamma,
-            cql_alpha=args.cql_alpha,
+            cql_alpha=current_cql_alpha,
             device=device,
+            ranking_topk=args.ranking_topk,
+            num_items=int(metadata["kept_item_count"]),
         )
 
         if should_break_training:
@@ -526,10 +709,15 @@ def main() -> None:
             f"train_total_loss={epoch_summary['train_total_loss']:.6f} - "
             f"train_td_loss={epoch_summary['train_td_loss']:.6f} - "
             f"train_cql_penalty={epoch_summary['train_cql_penalty']:.6f} - "
+            f"train_effective_cql_to_td_ratio={epoch_summary['train_effective_cql_to_td_ratio']:.6f} - "
+            f"train_cql_alpha={epoch_summary['train_cql_alpha']:.6f} - "
             f"train_grad_norm={epoch_summary['train_grad_norm']:.6f} - "
             f"valid_total_loss={epoch_summary['valid_total_loss']:.6f} - "
             f"valid_td_loss={epoch_summary['valid_td_loss']:.6f} - "
             f"valid_cql_penalty={epoch_summary['valid_cql_penalty']:.6f} - "
+            f"valid_hr@{args.ranking_topk}={epoch_summary['valid_hr_at_10']:.6f} - "
+            f"valid_ndcg@{args.ranking_topk}={epoch_summary['valid_ndcg_at_10']:.6f} - "
+            f"valid_effective_cql_to_td_ratio={epoch_summary['valid_effective_cql_to_td_ratio']:.6f} - "
             f"valid_mean_q={epoch_summary['valid_mean_q_value']:.6f} - "
             f"valid_max_q={epoch_summary['valid_max_q_value']:.6f}"
         )
@@ -548,13 +736,21 @@ def main() -> None:
         "encoder_learning_rate": args.encoder_learning_rate,
         "weight_decay": args.weight_decay,
         "gamma": args.gamma,
-        "cql_alpha": args.cql_alpha,
-        "target_update_interval": args.target_update_interval,
+        "td_loss_type": "smooth_l1_huber",
+        "cql_alpha_initial": args.cql_alpha,
+        "cql_alpha_final": current_cql_alpha,
+        "adaptive_cql_alpha": args.adaptive_cql_alpha,
+        "target_cql_ratio": args.target_cql_ratio,
+        "alpha_adaptation_rate": args.alpha_adaptation_rate,
+        "min_cql_alpha": args.min_cql_alpha,
+        "max_cql_alpha": args.max_cql_alpha,
+        "target_tau": args.target_tau,
         "log_interval": args.log_interval,
         "grad_clip_norm": args.grad_clip_norm,
         "q_warning_threshold": args.q_warning_threshold,
         "q_stop_threshold": args.q_stop_threshold,
         "selection_metric": args.selection_metric,
+        "ranking_topk": args.ranking_topk,
         "num_items": int(metadata["kept_item_count"]),
         "max_seq_len": int(metadata["max_seq_len"]),
         "train_transition_count": len(train_dataset),

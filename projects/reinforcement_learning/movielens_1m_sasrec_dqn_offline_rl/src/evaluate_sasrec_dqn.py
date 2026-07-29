@@ -8,12 +8,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from ml_1m_genre_utils import (
-    DEFAULT_ITEM_MAPPING_PATH,
-    DEFAULT_MOVIES_PATH,
-    compute_recommendation_reward,
-    load_mapped_movie_genres,
-)
+from ml_1m_genre_utils import DEFAULT_ITEM_MAPPING_PATH, DEFAULT_MOVIES_PATH, compute_recommendation_reward
 from sasrec_dqn_model import SASRecDQN
 from train_sasrec_dqn import load_offline_buffer_metadata, resolve_device
 
@@ -229,7 +224,6 @@ def mask_seen_items(
 def evaluate_model(
     model: SASRecDQN,
     dataloader: DataLoader,
-    mapped_movie_genres: dict[int, set[str]],
     device: torch.device,
     topk: int,
     num_items: int,
@@ -239,7 +233,6 @@ def evaluate_model(
     ndcg_sum = 0.0
     top1_reward_sum = 0.0
     top1_exact_hit_count = 0
-    top1_genre_match_count = 0
     per_user_reward_sum: dict[int, float] = {}
     per_user_step_count: dict[int, int] = {}
 
@@ -278,13 +271,11 @@ def evaluate_model(
                 reward = compute_recommendation_reward(
                     recommended_item_id=recommended_action,
                     target_item_id=target_action,
-                    mapped_movie_genres=mapped_movie_genres,
+                    mapped_movie_genres={},
                 )
                 top1_reward_sum += reward
                 if reward == 1.0:
                     top1_exact_hit_count += 1
-                elif reward == 0.1:
-                    top1_genre_match_count += 1
 
                 per_user_reward_sum[user_id] = per_user_reward_sum.get(user_id, 0.0) + reward
                 per_user_step_count[user_id] = per_user_step_count.get(user_id, 0) + 1
@@ -301,7 +292,6 @@ def evaluate_model(
         "user_count": len(per_user_rewards),
         "top1_average_reward": top1_reward_sum / max(total_examples, 1),
         "top1_exact_hit_rate": top1_exact_hit_count / max(total_examples, 1),
-        "top1_genre_match_rate": top1_genre_match_count / max(total_examples, 1),
         "mean_cumulative_reward_per_user": mean_cumulative_reward,
         "min_cumulative_reward_per_user": min(per_user_rewards) if per_user_rewards else 0.0,
         "max_cumulative_reward_per_user": max(per_user_rewards) if per_user_rewards else 0.0,
@@ -319,17 +309,12 @@ def main() -> None:
     metadata = load_offline_buffer_metadata(offline_buffer_dir)
     dataset = load_eval_dataset(offline_buffer_dir, args.split)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
-    mapped_movie_genres = load_mapped_movie_genres(
-        movies_path=Path(args.movies_path),
-        item_mapping_path=Path(args.item_mapping_path),
-    )
 
     device = resolve_device(args.device)
     model = build_model(args, metadata, device)
     metrics = evaluate_model(
         model=model,
         dataloader=dataloader,
-        mapped_movie_genres=mapped_movie_genres,
         device=device,
         topk=args.topk,
         num_items=int(metadata["kept_item_count"]),
@@ -347,11 +332,14 @@ def main() -> None:
         "user_count": int(metrics["user_count"]),
         "top1_average_reward": float(metrics["top1_average_reward"]),
         "top1_exact_hit_rate": float(metrics["top1_exact_hit_rate"]),
-        "top1_genre_match_rate": float(metrics["top1_genre_match_rate"]),
         "mean_cumulative_reward_per_user": float(metrics["mean_cumulative_reward_per_user"]),
         "min_cumulative_reward_per_user": float(metrics["min_cumulative_reward_per_user"]),
         "max_cumulative_reward_per_user": float(metrics["max_cumulative_reward_per_user"]),
         "mean_episode_length": float(metrics["mean_episode_length"]),
+        "reward_definition": {
+            "exact_hit_reward": 1.0,
+            "non_hit_reward": 0.0,
+        },
     }
 
     result_path = output_dir / f"{args.split}_sasrec_dqn_metrics.json"
