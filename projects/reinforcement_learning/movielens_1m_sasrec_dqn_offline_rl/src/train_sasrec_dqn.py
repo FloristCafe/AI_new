@@ -124,6 +124,12 @@ def parse_args() -> argparse.Namespace:
         help="Initial weight of the CQL conservative penalty.",
     )
     parser.add_argument(
+        "--ce-regularization-weight",
+        type=float,
+        default=0.1,
+        help="Weight of the supervised cross-entropy regularization added on top of the RL loss.",
+    )
+    parser.add_argument(
         "--target-tau",
         type=float,
         default=0.005,
@@ -328,6 +334,7 @@ def compute_batch_losses(
     batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
     gamma: float,
     cql_alpha: float,
+    ce_regularization_weight: float,
     device: torch.device,
 ) -> dict[str, torch.Tensor]:
     states, actions, rewards, next_states, dones = batch
@@ -350,15 +357,19 @@ def compute_batch_losses(
     td_loss = F.smooth_l1_loss(current_q, target_q)
     cql_logsumexp = torch.logsumexp(q_values, dim=1)
     cql_penalty = (cql_logsumexp - current_q).mean()
-    total_loss = td_loss + cql_alpha * cql_penalty
+    rl_loss = td_loss + cql_alpha * cql_penalty
+    ce_loss = F.cross_entropy(q_values, actions.long() - 1)
+    total_loss = rl_loss + ce_regularization_weight * ce_loss
     ratio_denominator = td_loss.detach().abs().clamp_min(1e-8)
     raw_cql_to_td_ratio = cql_penalty.detach() / ratio_denominator
     effective_cql_to_td_ratio = (cql_alpha * cql_penalty.detach()) / ratio_denominator
 
     return {
         "total_loss": total_loss,
+        "rl_loss": rl_loss,
         "td_loss": td_loss,
         "cql_penalty": cql_penalty,
+        "ce_loss": ce_loss,
         "raw_cql_to_td_ratio": raw_cql_to_td_ratio,
         "effective_cql_to_td_ratio": effective_cql_to_td_ratio,
         "mean_q_value": q_values.mean(),
@@ -420,6 +431,7 @@ def run_validation(
     dataloader: DataLoader,
     gamma: float,
     cql_alpha: float,
+    ce_regularization_weight: float,
     device: torch.device,
     ranking_topk: int,
     num_items: int,
@@ -427,8 +439,10 @@ def run_validation(
     total_examples = 0
     metric_sums = {
         "valid_total_loss": 0.0,
+        "valid_rl_loss": 0.0,
         "valid_td_loss": 0.0,
         "valid_cql_penalty": 0.0,
+        "valid_ce_loss": 0.0,
         "valid_hr_at_10": 0.0,
         "valid_ndcg_at_10": 0.0,
         "valid_raw_cql_to_td_ratio": 0.0,
@@ -449,6 +463,7 @@ def run_validation(
                 batch=batch,
                 gamma=gamma,
                 cql_alpha=cql_alpha,
+                ce_regularization_weight=ce_regularization_weight,
                 device=device,
             )
             states, actions, _, _, _ = batch
@@ -467,8 +482,10 @@ def run_validation(
             batch_size = batch[0].size(0)
             total_examples += batch_size
             metric_sums["valid_total_loss"] += float(losses["total_loss"].item()) * batch_size
+            metric_sums["valid_rl_loss"] += float(losses["rl_loss"].item()) * batch_size
             metric_sums["valid_td_loss"] += float(losses["td_loss"].item()) * batch_size
             metric_sums["valid_cql_penalty"] += float(losses["cql_penalty"].item()) * batch_size
+            metric_sums["valid_ce_loss"] += float(losses["ce_loss"].item()) * batch_size
             metric_sums["valid_hr_at_10"] += hr_batch * batch_size
             metric_sums["valid_ndcg_at_10"] += ndcg_batch * batch_size
             metric_sums["valid_raw_cql_to_td_ratio"] += float(losses["raw_cql_to_td_ratio"].item()) * batch_size
@@ -548,8 +565,10 @@ def main() -> None:
         epoch_example_count = 0
         epoch_sums = {
             "train_total_loss": 0.0,
+            "train_rl_loss": 0.0,
             "train_td_loss": 0.0,
             "train_cql_penalty": 0.0,
+            "train_ce_loss": 0.0,
             "train_raw_cql_to_td_ratio": 0.0,
             "train_effective_cql_to_td_ratio": 0.0,
             "train_mean_q_value": 0.0,
@@ -568,6 +587,7 @@ def main() -> None:
                 batch=batch,
                 gamma=args.gamma,
                 cql_alpha=current_cql_alpha,
+                ce_regularization_weight=args.ce_regularization_weight,
                 device=device,
             )
 
@@ -599,8 +619,10 @@ def main() -> None:
             batch_size = batch[0].size(0)
             epoch_example_count += batch_size
             epoch_sums["train_total_loss"] += float(losses["total_loss"].item()) * batch_size
+            epoch_sums["train_rl_loss"] += float(losses["rl_loss"].item()) * batch_size
             epoch_sums["train_td_loss"] += float(losses["td_loss"].item()) * batch_size
             epoch_sums["train_cql_penalty"] += float(losses["cql_penalty"].item()) * batch_size
+            epoch_sums["train_ce_loss"] += float(losses["ce_loss"].item()) * batch_size
             epoch_sums["train_raw_cql_to_td_ratio"] += float(losses["raw_cql_to_td_ratio"].item()) * batch_size
             epoch_sums["train_effective_cql_to_td_ratio"] += float(
                 losses["effective_cql_to_td_ratio"].item()
@@ -653,8 +675,10 @@ def main() -> None:
                 print(
                     f"Step {global_step} - "
                     f"total_loss={losses['total_loss'].item():.6f} - "
+                    f"rl_loss={losses['rl_loss'].item():.6f} - "
                     f"td_loss={losses['td_loss'].item():.6f} - "
                     f"cql_penalty={losses['cql_penalty'].item():.6f} - "
+                    f"ce_loss={losses['ce_loss'].item():.6f} - "
                     f"effective_cql_to_td_ratio={losses['effective_cql_to_td_ratio'].item():.6f} - "
                     f"cql_alpha={current_cql_alpha:.6f} - "
                     f"mean_q={losses['mean_q_value'].item():.6f} - "
@@ -675,6 +699,7 @@ def main() -> None:
             dataloader=valid_dataloader,
             gamma=args.gamma,
             cql_alpha=current_cql_alpha,
+            ce_regularization_weight=args.ce_regularization_weight,
             device=device,
             ranking_topk=args.ranking_topk,
             num_items=int(metadata["kept_item_count"]),
@@ -707,14 +732,18 @@ def main() -> None:
         print(
             f"Epoch {epoch_idx}/{args.epochs} - "
             f"train_total_loss={epoch_summary['train_total_loss']:.6f} - "
+            f"train_rl_loss={epoch_summary['train_rl_loss']:.6f} - "
             f"train_td_loss={epoch_summary['train_td_loss']:.6f} - "
             f"train_cql_penalty={epoch_summary['train_cql_penalty']:.6f} - "
+            f"train_ce_loss={epoch_summary['train_ce_loss']:.6f} - "
             f"train_effective_cql_to_td_ratio={epoch_summary['train_effective_cql_to_td_ratio']:.6f} - "
             f"train_cql_alpha={epoch_summary['train_cql_alpha']:.6f} - "
             f"train_grad_norm={epoch_summary['train_grad_norm']:.6f} - "
             f"valid_total_loss={epoch_summary['valid_total_loss']:.6f} - "
+            f"valid_rl_loss={epoch_summary['valid_rl_loss']:.6f} - "
             f"valid_td_loss={epoch_summary['valid_td_loss']:.6f} - "
             f"valid_cql_penalty={epoch_summary['valid_cql_penalty']:.6f} - "
+            f"valid_ce_loss={epoch_summary['valid_ce_loss']:.6f} - "
             f"valid_hr@{args.ranking_topk}={epoch_summary['valid_hr_at_10']:.6f} - "
             f"valid_ndcg@{args.ranking_topk}={epoch_summary['valid_ndcg_at_10']:.6f} - "
             f"valid_effective_cql_to_td_ratio={epoch_summary['valid_effective_cql_to_td_ratio']:.6f} - "
@@ -739,6 +768,7 @@ def main() -> None:
         "td_loss_type": "smooth_l1_huber",
         "cql_alpha_initial": args.cql_alpha,
         "cql_alpha_final": current_cql_alpha,
+        "ce_regularization_weight": args.ce_regularization_weight,
         "adaptive_cql_alpha": args.adaptive_cql_alpha,
         "target_cql_ratio": args.target_cql_ratio,
         "alpha_adaptation_rate": args.alpha_adaptation_rate,
