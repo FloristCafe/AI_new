@@ -1,0 +1,21 @@
+{
+  "split": "test",
+  "offline_buffer_dir": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\offline_buffer",
+  "checkpoint_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\experiments\\cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05_seed7\\checkpoints\\sasrec_dqn_best.pt",
+  "device": "cuda",
+  "topk": 10,
+  "hr_at_k": 0.19337748344370861,
+  "ndcg_at_k": 0.1039599781098453,
+  "step_count": 6040,
+  "user_count": 6040,
+  "top1_average_reward": 0.03708609271523179,
+  "top1_exact_hit_rate": 0.03708609271523179,
+  "mean_cumulative_reward_per_user": 0.03708609271523179,
+  "min_cumulative_reward_per_user": 0.0,
+  "max_cumulative_reward_per_user": 1.0,
+  "mean_episode_length": 1.0,
+  "reward_definition": {
+    "exact_hit_reward": 1.0,
+    "non_hit_reward": 0.0
+  }
+}
