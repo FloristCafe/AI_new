@@ -115,6 +115,15 @@ class SASRecDQN(nn.Module):
         )
         self.q_head = nn.Linear(embedding_dim, num_items)
 
+    def reset_q_head_parameters(
+        self,
+        init_std: float = 0.01,
+        init_mean: float = 0.0,
+    ) -> None:
+        nn.init.normal_(self.q_head.weight, mean=init_mean, std=init_std)
+        if self.q_head.bias is not None:
+            nn.init.zeros_(self.q_head.bias)
+
     def get_state_embedding(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.encoder.get_last_hidden_state(input_ids)
 
@@ -198,6 +207,7 @@ class SASRecDQN(nn.Module):
 
         parameter_groups: list[dict[str, object]] = [
             {
+                "group_name": "q_head",
                 "params": list(self.q_head.parameters()),
                 "lr": q_head_learning_rate,
                 "weight_decay": weight_decay,
@@ -210,6 +220,7 @@ class SASRecDQN(nn.Module):
         if encoder_parameters:
             parameter_groups.append(
                 {
+                    "group_name": "encoder",
                     "params": encoder_parameters,
                     "lr": encoder_learning_rate,
                     "weight_decay": weight_decay,

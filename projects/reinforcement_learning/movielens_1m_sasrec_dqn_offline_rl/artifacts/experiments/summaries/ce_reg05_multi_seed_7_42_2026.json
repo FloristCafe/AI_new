@@ -1,0 +1,94 @@
+{
+  "summary_name": "ce_reg05_multi_seed_7_42_2026",
+  "experiment_dirs": [
+    "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\experiments\\cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05_seed7",
+    "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\experiments\\cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05",
+    "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\experiments\\cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05_seed2026"
+  ],
+  "rows": [
+    {
+      "run_name": "cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05_seed7",
+      "run_dir": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\experiments\\cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05_seed7",
+      "seed": 7,
+      "best_epoch": 10,
+      "best_valid_ndcg_at_10": 0.11166532514727362,
+      "test_hr_at_10": 0.19337748344370861,
+      "test_ndcg_at_10": 0.1039599781098453,
+      "test_top1_exact_hit_rate": 0.03708609271523179,
+      "all_hr_at_10": 0.24411342538341066,
+      "all_ndcg_at_10": 0.12714756679907877,
+      "all_top1_exact_hit_rate": 0.04237005981880344,
+      "all_mean_cumulative_reward_per_user": 6.974006622516557
+    },
+    {
+      "run_name": "cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05",
+      "run_dir": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\experiments\\cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05",
+      "seed": 42,
+      "best_epoch": 10,
+      "best_valid_ndcg_at_10": 0.11202340464208771,
+      "test_hr_at_10": 0.19039735099337748,
+      "test_ndcg_at_10": 0.1021792974824788,
+      "test_top1_exact_hit_rate": 0.035927152317880795,
+      "all_hr_at_10": 0.24074176523307406,
+      "all_ndcg_at_10": 0.12533210207531637,
+      "all_top1_exact_hit_rate": 0.04175648204681498,
+      "all_mean_cumulative_reward_per_user": 6.873013245033112
+    },
+    {
+      "run_name": "cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05_seed2026",
+      "run_dir": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_dqn_offline_rl\\artifacts\\experiments\\cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05_seed2026",
+      "seed": 2026,
+      "best_epoch": 9,
+      "best_valid_ndcg_at_10": 0.11127407926788535,
+      "test_hr_at_10": 0.19188741721854305,
+      "test_ndcg_at_10": 0.1039553229527018,
+      "test_top1_exact_hit_rate": 0.038410596026490065,
+      "all_hr_at_10": 0.24326346928942666,
+      "all_ndcg_at_10": 0.12650388022471104,
+      "all_top1_exact_hit_rate": 0.041889256253212485,
+      "all_mean_cumulative_reward_per_user": 6.8948675496688745
+    }
+  ],
+  "aggregate": {
+    "run_count": 3,
+    "seeds": [
+      7,
+      42,
+      2026
+    ],
+    "metrics": {
+      "best_valid_ndcg_at_10": {
+        "mean": 0.11165426968574889,
+        "std": 0.00030601067141307315
+      },
+      "test_hr_at_10": {
+        "mean": 0.19188741721854305,
+        "std": 0.001216633978203567
+      },
+      "test_ndcg_at_10": {
+        "mean": 0.10336486618167529,
+        "std": 0.0008383258209104889
+      },
+      "test_top1_exact_hit_rate": {
+        "mean": 0.037141280353200884,
+        "std": 0.0010146123791859947
+      },
+      "all_hr_at_10": {
+        "mean": 0.24270621996863714,
+        "std": 0.0014317630498752831
+      },
+      "all_ndcg_at_10": {
+        "mean": 0.12632784969970204,
+        "std": 0.0007515397971753838
+      },
+      "all_top1_exact_hit_rate": {
+        "mean": 0.0420052660396103,
+        "std": 0.0002635818955272815
+      },
+      "all_mean_cumulative_reward_per_user": {
+        "mean": 6.913962472406181,
+        "std": 0.04338492541299075
+      }
+    }
+  }
+}

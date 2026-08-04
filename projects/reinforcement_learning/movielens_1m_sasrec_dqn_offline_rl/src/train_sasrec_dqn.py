@@ -106,6 +106,24 @@ def parse_args() -> argparse.Namespace:
         help="Learning rate for the SASRec encoder. Set 0 to freeze the encoder.",
     )
     parser.add_argument(
+        "--encoder-warmup-epochs",
+        type=int,
+        default=0,
+        help="Freeze the pretrained SASRec encoder for the first N epochs, then unfreeze it.",
+    )
+    parser.add_argument(
+        "--q-head-init-std",
+        type=float,
+        default=0.01,
+        help="Std used to reinitialize the Q-head weights around zero. Set 0 to keep PyTorch default init.",
+    )
+    parser.add_argument(
+        "--q-head-init-mean",
+        type=float,
+        default=0.0,
+        help="Mean used when reinitializing the Q-head weights.",
+    )
+    parser.add_argument(
         "--weight-decay",
         type=float,
         default=1e-5,
@@ -127,7 +145,20 @@ def parse_args() -> argparse.Namespace:
         "--ce-regularization-weight",
         type=float,
         default=0.1,
-        help="Weight of the supervised cross-entropy regularization added on top of the RL loss.",
+        help="Weight of the supervised regularization term added on top of the RL loss.",
+    )
+    parser.add_argument(
+        "--supervised-regularizer",
+        type=str,
+        default="ce",
+        choices=["ce", "bpr", "none"],
+        help="Supervised regularizer used alongside RL loss.",
+    )
+    parser.add_argument(
+        "--bpr-negative-count",
+        type=int,
+        default=1,
+        help="Number of sampled negatives per positive when supervised_regularizer=bpr.",
     )
     parser.add_argument(
         "--target-tau",
@@ -283,6 +314,11 @@ def build_model(metadata: dict, args: argparse.Namespace, device: torch.device) 
         dropout=0.2,
     ).to(device)
     model.load_sasrec_encoder_weights(args.sasrec_checkpoint_path, map_location=device)
+    if args.q_head_init_std > 0.0:
+        model.reset_q_head_parameters(
+            init_std=args.q_head_init_std,
+            init_mean=args.q_head_init_mean,
+        )
     if args.encoder_learning_rate <= 0.0:
         model.freeze_encoder()
     else:
@@ -297,6 +333,22 @@ def build_optimizer(model: SASRecDQN, args: argparse.Namespace) -> torch.optim.O
         encoder_learning_rate=args.encoder_learning_rate,
     )
     return torch.optim.Adam(param_groups)
+
+
+def set_encoder_optimization_state(
+    model: SASRecDQN,
+    optimizer: torch.optim.Optimizer,
+    should_train_encoder: bool,
+    encoder_learning_rate: float,
+) -> None:
+    if should_train_encoder:
+        model.unfreeze_encoder()
+    else:
+        model.freeze_encoder()
+
+    for param_group in optimizer.param_groups:
+        if param_group.get("group_name") == "encoder":
+            param_group["lr"] = encoder_learning_rate if should_train_encoder else 0.0
 
 
 def soft_update_target_network(
@@ -328,13 +380,84 @@ def adapt_cql_alpha(
     return float(np.clip(updated_alpha, min_alpha, max_alpha))
 
 
+def sample_negative_items(
+    positive_actions: torch.Tensor,
+    num_items: int,
+    negative_count: int,
+) -> torch.Tensor:
+    negative_items = torch.randint(
+        low=1,
+        high=num_items + 1,
+        size=(positive_actions.size(0), negative_count),
+        device=positive_actions.device,
+    )
+    positive_actions = positive_actions.unsqueeze(1)
+    collision_mask = negative_items.eq(positive_actions)
+
+    while collision_mask.any():
+        negative_items[collision_mask] = torch.randint(
+            low=1,
+            high=num_items + 1,
+            size=(int(collision_mask.sum().item()),),
+            device=positive_actions.device,
+        )
+        collision_mask = negative_items.eq(positive_actions)
+
+    return negative_items
+
+
+def compute_supervised_regularization_loss(
+    q_values: torch.Tensor,
+    actions: torch.Tensor,
+    regularizer: str,
+    num_items: int,
+    bpr_negative_count: int,
+) -> dict[str, torch.Tensor]:
+    zero = q_values.new_zeros(())
+    if regularizer == "none":
+        return {
+            "supervised_loss": zero,
+            "ce_loss": zero,
+            "bpr_loss": zero,
+        }
+
+    if regularizer == "ce":
+        ce_loss = F.cross_entropy(q_values, actions.long() - 1)
+        return {
+            "supervised_loss": ce_loss,
+            "ce_loss": ce_loss,
+            "bpr_loss": zero,
+        }
+
+    if regularizer == "bpr":
+        positive_indices = (actions.long() - 1).unsqueeze(1)
+        positive_q = q_values.gather(1, positive_indices)
+        negative_items = sample_negative_items(
+            positive_actions=actions.long(),
+            num_items=num_items,
+            negative_count=bpr_negative_count,
+        )
+        negative_q = q_values.gather(1, negative_items - 1)
+        bpr_loss = -F.logsigmoid(positive_q - negative_q).mean()
+        return {
+            "supervised_loss": bpr_loss,
+            "ce_loss": zero,
+            "bpr_loss": bpr_loss,
+        }
+
+    raise ValueError(f"Unsupported supervised regularizer: {regularizer}")
+
+
 def compute_batch_losses(
     online_model: SASRecDQN,
     target_model: SASRecDQN,
     batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
     gamma: float,
     cql_alpha: float,
+    supervised_regularizer: str,
     ce_regularization_weight: float,
+    bpr_negative_count: int,
+    num_items: int,
     device: torch.device,
 ) -> dict[str, torch.Tensor]:
     states, actions, rewards, next_states, dones = batch
@@ -358,8 +481,14 @@ def compute_batch_losses(
     cql_logsumexp = torch.logsumexp(q_values, dim=1)
     cql_penalty = (cql_logsumexp - current_q).mean()
     rl_loss = td_loss + cql_alpha * cql_penalty
-    ce_loss = F.cross_entropy(q_values, actions.long() - 1)
-    total_loss = rl_loss + ce_regularization_weight * ce_loss
+    supervised_losses = compute_supervised_regularization_loss(
+        q_values=q_values,
+        actions=actions,
+        regularizer=supervised_regularizer,
+        num_items=num_items,
+        bpr_negative_count=bpr_negative_count,
+    )
+    total_loss = rl_loss + ce_regularization_weight * supervised_losses["supervised_loss"]
     ratio_denominator = td_loss.detach().abs().clamp_min(1e-8)
     raw_cql_to_td_ratio = cql_penalty.detach() / ratio_denominator
     effective_cql_to_td_ratio = (cql_alpha * cql_penalty.detach()) / ratio_denominator
@@ -369,7 +498,9 @@ def compute_batch_losses(
         "rl_loss": rl_loss,
         "td_loss": td_loss,
         "cql_penalty": cql_penalty,
-        "ce_loss": ce_loss,
+        "supervised_loss": supervised_losses["supervised_loss"],
+        "ce_loss": supervised_losses["ce_loss"],
+        "bpr_loss": supervised_losses["bpr_loss"],
         "raw_cql_to_td_ratio": raw_cql_to_td_ratio,
         "effective_cql_to_td_ratio": effective_cql_to_td_ratio,
         "mean_q_value": q_values.mean(),
@@ -431,7 +562,9 @@ def run_validation(
     dataloader: DataLoader,
     gamma: float,
     cql_alpha: float,
+    supervised_regularizer: str,
     ce_regularization_weight: float,
+    bpr_negative_count: int,
     device: torch.device,
     ranking_topk: int,
     num_items: int,
@@ -442,7 +575,9 @@ def run_validation(
         "valid_rl_loss": 0.0,
         "valid_td_loss": 0.0,
         "valid_cql_penalty": 0.0,
+        "valid_supervised_loss": 0.0,
         "valid_ce_loss": 0.0,
+        "valid_bpr_loss": 0.0,
         "valid_hr_at_10": 0.0,
         "valid_ndcg_at_10": 0.0,
         "valid_raw_cql_to_td_ratio": 0.0,
@@ -463,7 +598,10 @@ def run_validation(
                 batch=batch,
                 gamma=gamma,
                 cql_alpha=cql_alpha,
+                supervised_regularizer=supervised_regularizer,
                 ce_regularization_weight=ce_regularization_weight,
+                bpr_negative_count=bpr_negative_count,
+                num_items=num_items,
                 device=device,
             )
             states, actions, _, _, _ = batch
@@ -485,7 +623,9 @@ def run_validation(
             metric_sums["valid_rl_loss"] += float(losses["rl_loss"].item()) * batch_size
             metric_sums["valid_td_loss"] += float(losses["td_loss"].item()) * batch_size
             metric_sums["valid_cql_penalty"] += float(losses["cql_penalty"].item()) * batch_size
+            metric_sums["valid_supervised_loss"] += float(losses["supervised_loss"].item()) * batch_size
             metric_sums["valid_ce_loss"] += float(losses["ce_loss"].item()) * batch_size
+            metric_sums["valid_bpr_loss"] += float(losses["bpr_loss"].item()) * batch_size
             metric_sums["valid_hr_at_10"] += hr_batch * batch_size
             metric_sums["valid_ndcg_at_10"] += ndcg_batch * batch_size
             metric_sums["valid_raw_cql_to_td_ratio"] += float(losses["raw_cql_to_td_ratio"].item()) * batch_size
@@ -547,6 +687,16 @@ def main() -> None:
     optimizer = build_optimizer(online_model, args)
     current_cql_alpha = float(args.cql_alpha)
 
+    encoder_currently_trainable = args.encoder_learning_rate > 0.0
+    if args.encoder_learning_rate > 0.0 and args.encoder_warmup_epochs > 0:
+        encoder_currently_trainable = False
+        set_encoder_optimization_state(
+            model=online_model,
+            optimizer=optimizer,
+            should_train_encoder=False,
+            encoder_learning_rate=args.encoder_learning_rate,
+        )
+
     if args.selection_metric in {"valid_hr_at_10", "valid_ndcg_at_10"}:
         best_metric_value = float("-inf")
     else:
@@ -561,6 +711,26 @@ def main() -> None:
     final_checkpoint_path = checkpoints_dir / "sasrec_dqn_final.pt"
 
     for epoch_idx in range(1, args.epochs + 1):
+        should_train_encoder_this_epoch = (
+            args.encoder_learning_rate > 0.0
+            and epoch_idx > args.encoder_warmup_epochs
+        )
+        if should_train_encoder_this_epoch != encoder_currently_trainable:
+            set_encoder_optimization_state(
+                model=online_model,
+                optimizer=optimizer,
+                should_train_encoder=should_train_encoder_this_epoch,
+                encoder_learning_rate=args.encoder_learning_rate,
+            )
+            encoder_currently_trainable = should_train_encoder_this_epoch
+            if should_train_encoder_this_epoch:
+                print(
+                    f"Epoch {epoch_idx}: encoder warmup finished, unfreezing encoder "
+                    f"with learning rate {args.encoder_learning_rate:.6g}."
+                )
+            else:
+                print(f"Epoch {epoch_idx}: encoder kept frozen for warmup.")
+
         online_model.train()
         epoch_example_count = 0
         epoch_sums = {
@@ -568,7 +738,9 @@ def main() -> None:
             "train_rl_loss": 0.0,
             "train_td_loss": 0.0,
             "train_cql_penalty": 0.0,
+            "train_supervised_loss": 0.0,
             "train_ce_loss": 0.0,
+            "train_bpr_loss": 0.0,
             "train_raw_cql_to_td_ratio": 0.0,
             "train_effective_cql_to_td_ratio": 0.0,
             "train_mean_q_value": 0.0,
@@ -577,6 +749,7 @@ def main() -> None:
             "train_mean_target_q": 0.0,
             "train_grad_norm": 0.0,
             "train_cql_alpha": 0.0,
+            "train_encoder_learning_rate": 0.0,
         }
         should_break_training = False
 
@@ -587,7 +760,10 @@ def main() -> None:
                 batch=batch,
                 gamma=args.gamma,
                 cql_alpha=current_cql_alpha,
+                supervised_regularizer=args.supervised_regularizer,
                 ce_regularization_weight=args.ce_regularization_weight,
+                bpr_negative_count=args.bpr_negative_count,
+                num_items=int(metadata["kept_item_count"]),
                 device=device,
             )
 
@@ -622,7 +798,9 @@ def main() -> None:
             epoch_sums["train_rl_loss"] += float(losses["rl_loss"].item()) * batch_size
             epoch_sums["train_td_loss"] += float(losses["td_loss"].item()) * batch_size
             epoch_sums["train_cql_penalty"] += float(losses["cql_penalty"].item()) * batch_size
+            epoch_sums["train_supervised_loss"] += float(losses["supervised_loss"].item()) * batch_size
             epoch_sums["train_ce_loss"] += float(losses["ce_loss"].item()) * batch_size
+            epoch_sums["train_bpr_loss"] += float(losses["bpr_loss"].item()) * batch_size
             epoch_sums["train_raw_cql_to_td_ratio"] += float(losses["raw_cql_to_td_ratio"].item()) * batch_size
             epoch_sums["train_effective_cql_to_td_ratio"] += float(
                 losses["effective_cql_to_td_ratio"].item()
@@ -633,6 +811,9 @@ def main() -> None:
             epoch_sums["train_mean_target_q"] += float(losses["mean_target_q"].item()) * batch_size
             epoch_sums["train_grad_norm"] += float(grad_norm.item()) * batch_size
             epoch_sums["train_cql_alpha"] += current_cql_alpha * batch_size
+            epoch_sums["train_encoder_learning_rate"] += (
+                args.encoder_learning_rate if encoder_currently_trainable else 0.0
+            ) * batch_size
 
             global_step += 1
             soft_update_target_network(
@@ -678,7 +859,9 @@ def main() -> None:
                     f"rl_loss={losses['rl_loss'].item():.6f} - "
                     f"td_loss={losses['td_loss'].item():.6f} - "
                     f"cql_penalty={losses['cql_penalty'].item():.6f} - "
+                    f"supervised_loss={losses['supervised_loss'].item():.6f} - "
                     f"ce_loss={losses['ce_loss'].item():.6f} - "
+                    f"bpr_loss={losses['bpr_loss'].item():.6f} - "
                     f"effective_cql_to_td_ratio={losses['effective_cql_to_td_ratio'].item():.6f} - "
                     f"cql_alpha={current_cql_alpha:.6f} - "
                     f"mean_q={losses['mean_q_value'].item():.6f} - "
@@ -699,7 +882,9 @@ def main() -> None:
             dataloader=valid_dataloader,
             gamma=args.gamma,
             cql_alpha=current_cql_alpha,
+            supervised_regularizer=args.supervised_regularizer,
             ce_regularization_weight=args.ce_regularization_weight,
+            bpr_negative_count=args.bpr_negative_count,
             device=device,
             ranking_topk=args.ranking_topk,
             num_items=int(metadata["kept_item_count"]),
@@ -735,15 +920,20 @@ def main() -> None:
             f"train_rl_loss={epoch_summary['train_rl_loss']:.6f} - "
             f"train_td_loss={epoch_summary['train_td_loss']:.6f} - "
             f"train_cql_penalty={epoch_summary['train_cql_penalty']:.6f} - "
+            f"train_supervised_loss={epoch_summary['train_supervised_loss']:.6f} - "
             f"train_ce_loss={epoch_summary['train_ce_loss']:.6f} - "
+            f"train_bpr_loss={epoch_summary['train_bpr_loss']:.6f} - "
             f"train_effective_cql_to_td_ratio={epoch_summary['train_effective_cql_to_td_ratio']:.6f} - "
             f"train_cql_alpha={epoch_summary['train_cql_alpha']:.6f} - "
+            f"train_encoder_lr={epoch_summary['train_encoder_learning_rate']:.6f} - "
             f"train_grad_norm={epoch_summary['train_grad_norm']:.6f} - "
             f"valid_total_loss={epoch_summary['valid_total_loss']:.6f} - "
             f"valid_rl_loss={epoch_summary['valid_rl_loss']:.6f} - "
             f"valid_td_loss={epoch_summary['valid_td_loss']:.6f} - "
             f"valid_cql_penalty={epoch_summary['valid_cql_penalty']:.6f} - "
+            f"valid_supervised_loss={epoch_summary['valid_supervised_loss']:.6f} - "
             f"valid_ce_loss={epoch_summary['valid_ce_loss']:.6f} - "
+            f"valid_bpr_loss={epoch_summary['valid_bpr_loss']:.6f} - "
             f"valid_hr@{args.ranking_topk}={epoch_summary['valid_hr_at_10']:.6f} - "
             f"valid_ndcg@{args.ranking_topk}={epoch_summary['valid_ndcg_at_10']:.6f} - "
             f"valid_effective_cql_to_td_ratio={epoch_summary['valid_effective_cql_to_td_ratio']:.6f} - "
@@ -763,12 +953,17 @@ def main() -> None:
         "eval_batch_size": args.eval_batch_size,
         "q_head_learning_rate": args.q_head_learning_rate,
         "encoder_learning_rate": args.encoder_learning_rate,
+        "encoder_warmup_epochs": args.encoder_warmup_epochs,
+        "q_head_init_std": args.q_head_init_std,
+        "q_head_init_mean": args.q_head_init_mean,
         "weight_decay": args.weight_decay,
         "gamma": args.gamma,
         "td_loss_type": "smooth_l1_huber",
         "cql_alpha_initial": args.cql_alpha,
         "cql_alpha_final": current_cql_alpha,
+        "supervised_regularizer": args.supervised_regularizer,
         "ce_regularization_weight": args.ce_regularization_weight,
+        "bpr_negative_count": args.bpr_negative_count,
         "adaptive_cql_alpha": args.adaptive_cql_alpha,
         "target_cql_ratio": args.target_cql_ratio,
         "alpha_adaptation_rate": args.alpha_adaptation_rate,
@@ -786,6 +981,7 @@ def main() -> None:
         "train_transition_count": len(train_dataset),
         "valid_transition_count": len(valid_dataset),
         "encoder_frozen": args.encoder_learning_rate <= 0.0,
+        "encoder_finally_trainable": encoder_currently_trainable,
         "stopped_early": stopped_early,
         "stop_reason": stop_reason,
         "sasrec_checkpoint_path": str(Path(args.sasrec_checkpoint_path)),
