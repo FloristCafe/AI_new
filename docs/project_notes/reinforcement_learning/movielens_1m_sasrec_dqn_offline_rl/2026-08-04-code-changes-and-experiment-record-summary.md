@@ -236,17 +236,36 @@ best checkpoint 现在不再按：
 - `ce = 0.3` 更偏全轨迹质量
 - `ce = 0.5` 是当前 next-item 排序最强版本
 
-### 6. strongest baseline 已正式封板
+### 6. strongest baseline 的阶段性更新
 
-截至当前阶段，正式 strongest baseline 为：
+这条主线先经历了一个旧阶段 strongest baseline：
 
 - `cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05`
 
-它的意义不只是分数最好，更重要的是：
+它代表的是：
 
-- valid ranking 指标支持它
-- test 指标支持它
-- 训练过程本身比早期版本健康
+- `gamma = 0.9`
+- `binary reward`
+- `Huber TD`
+- `valid_ndcg_at_10` 选模
+- `RL + CE`
+
+在当时，它已经明显优于更早的不稳定版本，并完成了多 seed 验证。
+
+但在 **2026-08-05**，随着 `warmup5` 与 `encoder_frozen` 实验完成，strongest baseline 需要进一步更新为：
+
+- `cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05_encoder_frozen`
+
+新的 strongest baseline 额外具备：
+
+- `Q-head` 小尺度初始化
+- encoder 全程冻结
+
+它的意义不只是分数更高，而是让我们更清楚地知道：
+
+- 当前最优收益来自 frozen encoder 阶段
+- RL 对决策头有效
+- RL 还没有证明自己能安全微调 encoder
 
 ### 7. multi-seed 验证已经完成
 
@@ -275,7 +294,46 @@ best checkpoint 现在不再按：
 
 这一步非常重要，因为它说明 strongest baseline 已经不再是偶然样本，而是稳定复现的结果。
 
-### 8. 当前关于 “best_epoch = 1” 的新认识
+### 8. warmup5 与 frozen-encoder 新实验结果
+
+在 latest strongest baseline 更新之前，又新增了两组特别关键的实验：
+
+- `cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05_warmup5`
+- `cql_huber_gamma09_binary_reward_valid_ndcg_ce_reg05_encoder_frozen`
+
+它们给出了一个非常清晰的结构性信号。
+
+#### `warmup5`
+
+- `best_epoch = 5`
+- `best_valid_ndcg_at_10 = 0.12605225919047516`
+- `test HR@10 = 0.2099337748344371`
+- `test NDCG@10 = 0.1166359124280432`
+- `all HR@10 = 0.2737029619712544`
+- `all NDCG@10 = 0.14818211838997059`
+- `all mean_cumulative_reward_per_user = 9.029304635761589`
+
+#### `encoder_frozen`
+
+- `best_epoch = 5`
+- `best_valid_ndcg_at_10 = 0.12605225919047516`
+- `test HR@10 = 0.2099337748344371`
+- `test NDCG@10 = 0.1166359124280432`
+- `all HR@10 = 0.2737029619712544`
+- `all NDCG@10 = 0.14818211838997059`
+- `all mean_cumulative_reward_per_user = 9.029304635761589`
+
+这两组结果完全一致，不是偶然，而是因为：
+
+- `warmup5` 的前 5 个 epoch 本来就冻结 encoder
+- 最优点恰好出现在 `epoch 5`
+
+因此，这两个实验共同证明：
+
+- 当前最优 checkpoint 来自 frozen encoder 阶段
+- encoder 解冻后的后续训练并没有带来额外收益
+
+### 9. 当前关于 “best_epoch = 1” 的新认识
 
 随着实验推进，我们对这个现象的理解已经更具体：
 
@@ -286,37 +344,41 @@ best checkpoint 现在不再按：
 
 因此，新加入的 warmup 与小尺度初始化，不是普通微调，而是正式针对训练动力学问题的修复。
 
+此外，在 **2026-08-05** 之后，这个认识还进一步细化为：
+
+- 冻结 encoder 不等于 RL 没学到东西
+- RL 仍然在 fixed representation 上学到了更强的 Q-head / 排序边界
+- 当前尚无证据证明 RL fine-tune encoder 有效
+
 ## 三、当前阶段的整体结论
 
 到现在为止，这个项目已经不再是“能不能跑通”的问题，而是：
 
-- 已经有一条稳定的 strongest baseline
+- 已经有一条稳定且更新后的 strongest baseline
 - 已经把早期数值失控和选模错位问题基本理顺
 - 已经具备进入真正方法升级阶段的工程基础
 
 换句话说，当前阶段已经完成了三件最关键的事情：
 
 - 把离线序列推荐 RL 系统搭起来
-- 把 strongest baseline 稳下来
+- 把 strongest baseline 稳下来并更新到 frozen-encoder 版本
 - 把下一步创新接口预留出来
 
 ## 四、接下来最合理的实验方向
 
 在这份总表对应的时间点之后，最值得继续推进的不是普通参数扫描，而是两条更有研究意义的线：
 
-### 1. 训练动力学修复验证
+### 1. 训练动力学方向的当前阶段结论
 
-继续验证：
+当前阶段已经得到一个很明确的训练动力学判断：
 
-- `encoder warmup epochs = 0 / 3 / 5`
+- `warmup5` 是有效的
+- 但其有效性主要来自 frozen encoder 阶段
+- encoder 解冻后的继续训练当前并不带来收益
 
-观察：
+因此，在进入新方法之前，当前最可靠的训练主线应该优先视作：
 
-- `best_epoch`
-- `valid_ndcg_at_10`
-- `train / valid Q-value`
-
-是否明显变得更健康。
+- `fixed representation + stronger RL/CE head`
 
 ### 2. 真正的方法升级
 
