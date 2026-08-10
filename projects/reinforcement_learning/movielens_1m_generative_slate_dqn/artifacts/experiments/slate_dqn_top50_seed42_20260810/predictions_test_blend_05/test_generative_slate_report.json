@@ -1,0 +1,583 @@
+{
+  "schema": {
+    "schema_version": "generative_slate_eval_v1",
+    "top_level_fields": {
+      "protocol": "Evaluation protocol metadata and run configuration.",
+      "policies": "Per-policy metric reports keyed by policy name.",
+      "policy_ranking": "Policy ranking sorted by core reward metrics."
+    },
+    "policy_report_fields": {
+      "reward_metrics": {
+        "mean_slate_reward": "Average total clicks per generated slate.",
+        "mean_clicks_per_slate": "Alias of average realized clicks per slate.",
+        "slate_success_rate": "Fraction of slates with at least one click.",
+        "multi_click_rate": "Fraction of slates with at least two clicks.",
+        "single_slate_mean_reward": "Average reward of the first slate only.",
+        "single_slate_success_rate": "First-slate hit rate.",
+        "single_slate_multi_click_rate": "First-slate multi-click rate.",
+        "mean_episode_return": "Average cumulative clicks over a full episode.",
+        "mean_episode_length": "Average number of slates served per episode.",
+        "reward_decay_curve": "Mean reward by slate step within an episode."
+      },
+      "position_metrics": {
+        "examine_rate_by_position": "Exposure probability realized at each slate position.",
+        "click_rate_by_position": "Actual click-through rate at each slate position.",
+        "ctr_given_examine_by_position": "Conditional CTR given exposure at each position.",
+        "first_click_position_mean": "Mean 1-based position of the first click among clicked slates.",
+        "first_click_defined_rate": "Fraction of slates with at least one click.",
+        "position_weighted_gain_mean": "Discounted click gain weighted by 1/log2(k+1)."
+      },
+      "diversity_metrics": {
+        "duplicate_rate": "Fraction of duplicate item slots across all slates.",
+        "same_genre_repeat_rate": "Fraction of repeated primary-genre slots.",
+        "unique_genre_count_mean": "Average number of distinct primary genres per slate.",
+        "genre_entropy_mean": "Average entropy of the primary-genre mix within a slate.",
+        "intra_list_diversity_mean": "Average pairwise genre dissimilarity inside a slate.",
+        "catalog_coverage": "Fraction of the item catalog recommended at least once.",
+        "genre_coverage": "Fraction of genres covered by the generated slates."
+      },
+      "offline_bridge_metrics": {
+        "target_hit_at_5": "Whether the held-out next item appears in the first slate.",
+        "target_ndcg_at_5": "NDCG of the held-out next item in the first slate.",
+        "target_mrr_at_5": "MRR of the held-out next item in the first slate.",
+        "genre_hit_at_5": "Whether the target movie genre is covered in the first slate."
+      },
+      "raw_counts": {
+        "episode_count": "Number of Monte Carlo episode rollouts evaluated.",
+        "slate_count": "Number of total slates evaluated.",
+        "first_slate_count": "Number of first-slate observations used for bridge metrics.",
+        "total_clicks": "Total realized clicks across all evaluated slates.",
+        "successful_slates": "Slates with at least one click.",
+        "multi_click_slates": "Slates with at least two clicks.",
+        "recommended_item_count": "Unique item count recommended across the run.",
+        "recommended_genre_count": "Unique genre count recommended across the run."
+      }
+    }
+  },
+  "protocol": {
+    "split_name": "test",
+    "checkpoint_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_generative_slate_dqn\\artifacts\\experiments\\slate_dqn_top50_seed42_20260810\\checkpoints\\slate_dqn_best.pt",
+    "sasrec_checkpoint_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\experiments\\seq50_dim128_blocks3_drop02_ce\\checkpoints\\sasrec_best.pt",
+    "train_sequence_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed\\train_sequence_supervision.npz",
+    "eval_sequence_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed\\test_sequences.npz",
+    "metadata_path": "D:\\Python\\Artificial Intelligence\\projects\\reinforcement_learning\\movielens_1m_sasrec_baseline\\artifacts\\preprocessed\\metadata.json",
+    "device": "cuda",
+    "seed": 42,
+    "num_items": 3706,
+    "max_seq_len": 50,
+    "slate_size": 5,
+    "candidate_pool_size": 50,
+    "blend_lambda": 0.5,
+    "mc_rollouts": 3,
+    "rollout_batch_size": 128,
+    "max_eval_users": 0,
+    "max_slates_per_episode": 10,
+    "skip_baselines": false,
+    "policy_names": [
+      "slate_dqn",
+      "sasrec_topk",
+      "popularity_topk",
+      "random_unique"
+    ]
+  },
+  "policies": {
+    "slate_dqn": {
+      "reward_metrics": {
+        "mean_slate_reward": 0.7596247240618101,
+        "mean_clicks_per_slate": 0.7596247240618101,
+        "slate_success_rate": 0.5498454746136865,
+        "multi_click_rate": 0.1738355408388521,
+        "single_slate_mean_reward": 1.3704194260485651,
+        "single_slate_success_rate": 0.8248344370860927,
+        "single_slate_multi_click_rate": 0.41462472406181017,
+        "mean_episode_return": 7.596247240618101,
+        "mean_episode_length": 10.0,
+        "reward_decay_curve": [
+          {
+            "slate_step": 1,
+            "mean_reward": 1.3704194260485651,
+            "count": 18120
+          },
+          {
+            "slate_step": 2,
+            "mean_reward": 1.0326710816777043,
+            "count": 18120
+          },
+          {
+            "slate_step": 3,
+            "mean_reward": 0.8576710816777042,
+            "count": 18120
+          },
+          {
+            "slate_step": 4,
+            "mean_reward": 0.736037527593819,
+            "count": 18120
+          },
+          {
+            "slate_step": 5,
+            "mean_reward": 0.687748344370861,
+            "count": 18120
+          },
+          {
+            "slate_step": 6,
+            "mean_reward": 0.6237858719646799,
+            "count": 18120
+          },
+          {
+            "slate_step": 7,
+            "mean_reward": 0.5966335540838852,
+            "count": 18120
+          },
+          {
+            "slate_step": 8,
+            "mean_reward": 0.5870309050772627,
+            "count": 18120
+          },
+          {
+            "slate_step": 9,
+            "mean_reward": 0.5524282560706402,
+            "count": 18120
+          },
+          {
+            "slate_step": 10,
+            "mean_reward": 0.5518211920529801,
+            "count": 18120
+          }
+        ]
+      },
+      "position_metrics": {
+        "examine_rate_by_position": [
+          1.0,
+          0.630733995584989,
+          0.4987748344370861,
+          0.4301158940397351,
+          0.3865783664459161
+        ],
+        "click_rate_by_position": [
+          0.30287527593818986,
+          0.1537306843267108,
+          0.1170860927152318,
+          0.10094922737306843,
+          0.08498344370860927
+        ],
+        "ctr_given_examine_by_position": [
+          0.30287527593818986,
+          0.24373299267646056,
+          0.23474739427736838,
+          0.23470238782606465,
+          0.21983497030607582
+        ],
+        "first_click_position_mean": 1.9415749959852255,
+        "first_click_defined_rate": 0.5498454746136865,
+        "position_weighted_gain_mean": 0.5347641346269109
+      },
+      "diversity_metrics": {
+        "duplicate_rate": 0.0,
+        "same_genre_repeat_rate": 0.4910154525386313,
+        "unique_genre_count_mean": 2.5449227373068433,
+        "genre_entropy_mean": 1.0887634358593221,
+        "intra_list_diversity_mean": 0.6454091589579471,
+        "catalog_coverage": 0.3729087965461414,
+        "genre_coverage": 1.0
+      },
+      "offline_bridge_metrics": {
+        "target_hit_at_5": 0.1195364238410596,
+        "target_ndcg_at_5": 0.07969909965641185,
+        "target_mrr_at_5": 0.06668046357615937,
+        "genre_hit_at_5": 0.8751655629139072
+      },
+      "raw_counts": {
+        "episode_count": 18120,
+        "slate_count": 181200,
+        "first_slate_count": 18120,
+        "total_clicks": 137644.0,
+        "successful_slates": 99632,
+        "multi_click_slates": 31499,
+        "recommended_item_count": 1382,
+        "recommended_genre_count": 18
+      }
+    },
+    "sasrec_topk": {
+      "reward_metrics": {
+        "mean_slate_reward": 0.7597075055187638,
+        "mean_clicks_per_slate": 0.7597075055187638,
+        "slate_success_rate": 0.5485596026490066,
+        "multi_click_rate": 0.17422737306843267,
+        "single_slate_mean_reward": 1.3560154525386314,
+        "single_slate_success_rate": 0.8166114790286976,
+        "single_slate_multi_click_rate": 0.40860927152317883,
+        "mean_episode_return": 7.597075055187638,
+        "mean_episode_length": 10.0,
+        "reward_decay_curve": [
+          {
+            "slate_step": 1,
+            "mean_reward": 1.3560154525386314,
+            "count": 18120
+          },
+          {
+            "slate_step": 2,
+            "mean_reward": 1.0169977924944813,
+            "count": 18120
+          },
+          {
+            "slate_step": 3,
+            "mean_reward": 0.8529801324503311,
+            "count": 18120
+          },
+          {
+            "slate_step": 4,
+            "mean_reward": 0.7350441501103753,
+            "count": 18120
+          },
+          {
+            "slate_step": 5,
+            "mean_reward": 0.6896247240618102,
+            "count": 18120
+          },
+          {
+            "slate_step": 6,
+            "mean_reward": 0.63780353200883,
+            "count": 18120
+          },
+          {
+            "slate_step": 7,
+            "mean_reward": 0.6044701986754967,
+            "count": 18120
+          },
+          {
+            "slate_step": 8,
+            "mean_reward": 0.5897350993377484,
+            "count": 18120
+          },
+          {
+            "slate_step": 9,
+            "mean_reward": 0.56158940397351,
+            "count": 18120
+          },
+          {
+            "slate_step": 10,
+            "mean_reward": 0.5528145695364238,
+            "count": 18120
+          }
+        ]
+      },
+      "position_metrics": {
+        "examine_rate_by_position": [
+          1.0,
+          0.630733995584989,
+          0.4987748344370861,
+          0.4301158940397351,
+          0.3865783664459161
+        ],
+        "click_rate_by_position": [
+          0.31764348785871965,
+          0.15030905077262693,
+          0.11216335540838852,
+          0.09586092715231788,
+          0.08373068432671081
+        ],
+        "ctr_given_examine_by_position": [
+          0.31764348785871965,
+          0.23830814864072658,
+          0.2248777357321472,
+          0.22287231995072943,
+          0.21659433531292827
+        ],
+        "first_click_position_mean": 1.8834092898318897,
+        "first_click_defined_rate": 0.5485596026490066,
+        "position_weighted_gain_mean": 0.5422361223697336
+      },
+      "diversity_metrics": {
+        "duplicate_rate": 0.0,
+        "same_genre_repeat_rate": 0.5232726269315673,
+        "unique_genre_count_mean": 2.3836368653421633,
+        "genre_entropy_mean": 0.9700227714845782,
+        "intra_list_diversity_mean": 0.6103725277252278,
+        "catalog_coverage": 0.6189962223421479,
+        "genre_coverage": 1.0
+      },
+      "offline_bridge_metrics": {
+        "target_hit_at_5": 0.14801324503311258,
+        "target_ndcg_at_5": 0.09853344826808415,
+        "target_mrr_at_5": 0.08231788079470227,
+        "genre_hit_at_5": 0.8746688741721854
+      },
+      "raw_counts": {
+        "episode_count": 18120,
+        "slate_count": 181200,
+        "first_slate_count": 18120,
+        "total_clicks": 137659.0,
+        "successful_slates": 99399,
+        "multi_click_slates": 31570,
+        "recommended_item_count": 2294,
+        "recommended_genre_count": 18
+      }
+    },
+    "popularity_topk": {
+      "reward_metrics": {
+        "mean_slate_reward": 0.7450551876379691,
+        "mean_clicks_per_slate": 0.7450551876379691,
+        "slate_success_rate": 0.557985651214128,
+        "multi_click_rate": 0.15717991169977924,
+        "single_slate_mean_reward": 1.314514348785872,
+        "single_slate_success_rate": 0.8292494481236203,
+        "single_slate_multi_click_rate": 0.3736754966887417,
+        "mean_episode_return": 7.4505518763796905,
+        "mean_episode_length": 10.0,
+        "reward_decay_curve": [
+          {
+            "slate_step": 1,
+            "mean_reward": 1.314514348785872,
+            "count": 18120
+          },
+          {
+            "slate_step": 2,
+            "mean_reward": 1.0438189845474615,
+            "count": 18120
+          },
+          {
+            "slate_step": 3,
+            "mean_reward": 0.8763245033112583,
+            "count": 18120
+          },
+          {
+            "slate_step": 4,
+            "mean_reward": 0.7449779249448124,
+            "count": 18120
+          },
+          {
+            "slate_step": 5,
+            "mean_reward": 0.6848233995584989,
+            "count": 18120
+          },
+          {
+            "slate_step": 6,
+            "mean_reward": 0.6126931567328918,
+            "count": 18120
+          },
+          {
+            "slate_step": 7,
+            "mean_reward": 0.5764348785871964,
+            "count": 18120
+          },
+          {
+            "slate_step": 8,
+            "mean_reward": 0.5529801324503312,
+            "count": 18120
+          },
+          {
+            "slate_step": 9,
+            "mean_reward": 0.5256622516556292,
+            "count": 18120
+          },
+          {
+            "slate_step": 10,
+            "mean_reward": 0.5183222958057395,
+            "count": 18120
+          }
+        ]
+      },
+      "position_metrics": {
+        "examine_rate_by_position": [
+          1.0,
+          0.630733995584989,
+          0.4987748344370861,
+          0.4301158940397351,
+          0.3865783664459161
+        ],
+        "click_rate_by_position": [
+          0.35496136865342165,
+          0.19117549668874173,
+          0.07483443708609272,
+          0.06581677704194261,
+          0.05826710816777042
+        ],
+        "ctr_given_examine_by_position": [
+          0.35496136865342165,
+          0.3031000358739686,
+          0.15003651331076148,
+          0.15302102980612545,
+          0.15072521699406122
+        ],
+        "first_click_position_mean": 1.646928501488522,
+        "first_click_defined_rate": 0.557985651214128,
+        "position_weighted_gain_mean": 0.563883433575477
+      },
+      "diversity_metrics": {
+        "duplicate_rate": 0.0,
+        "same_genre_repeat_rate": 0.6,
+        "unique_genre_count_mean": 2.0,
+        "genre_entropy_mean": 0.721928094881146,
+        "intra_list_diversity_mean": 0.7100000000027542,
+        "catalog_coverage": 0.0013491635186184566,
+        "genre_coverage": 0.5
+      },
+      "offline_bridge_metrics": {
+        "target_hit_at_5": 0.007781456953642384,
+        "target_ndcg_at_5": 0.005973113827899149,
+        "target_mrr_at_5": 0.005391832229580576,
+        "genre_hit_at_5": 0.9399006622516556
+      },
+      "raw_counts": {
+        "episode_count": 18120,
+        "slate_count": 181200,
+        "first_slate_count": 18120,
+        "total_clicks": 135004.0,
+        "successful_slates": 101107,
+        "multi_click_slates": 28481,
+        "recommended_item_count": 5,
+        "recommended_genre_count": 9
+      }
+    },
+    "random_unique": {
+      "reward_metrics": {
+        "mean_slate_reward": 0.8762858719646799,
+        "mean_clicks_per_slate": 0.8762858719646799,
+        "slate_success_rate": 0.6228145695364239,
+        "multi_click_rate": 0.21147902869757174,
+        "single_slate_mean_reward": 1.1566225165562913,
+        "single_slate_success_rate": 0.7422185430463576,
+        "single_slate_multi_click_rate": 0.32764900662251656,
+        "mean_episode_return": 8.762858719646799,
+        "mean_episode_length": 10.0,
+        "reward_decay_curve": [
+          {
+            "slate_step": 1,
+            "mean_reward": 1.1566225165562913,
+            "count": 18120
+          },
+          {
+            "slate_step": 2,
+            "mean_reward": 1.0429359823399558,
+            "count": 18120
+          },
+          {
+            "slate_step": 3,
+            "mean_reward": 0.9666114790286976,
+            "count": 18120
+          },
+          {
+            "slate_step": 4,
+            "mean_reward": 0.8960264900662251,
+            "count": 18120
+          },
+          {
+            "slate_step": 5,
+            "mean_reward": 0.8635761589403973,
+            "count": 18120
+          },
+          {
+            "slate_step": 6,
+            "mean_reward": 0.8167218543046357,
+            "count": 18120
+          },
+          {
+            "slate_step": 7,
+            "mean_reward": 0.781401766004415,
+            "count": 18120
+          },
+          {
+            "slate_step": 8,
+            "mean_reward": 0.7730132450331125,
+            "count": 18120
+          },
+          {
+            "slate_step": 9,
+            "mean_reward": 0.7365894039735099,
+            "count": 18120
+          },
+          {
+            "slate_step": 10,
+            "mean_reward": 0.7293598233995585,
+            "count": 18120
+          }
+        ]
+      },
+      "position_metrics": {
+        "examine_rate_by_position": [
+          1.0,
+          0.630733995584989,
+          0.4987748344370861,
+          0.4301158940397351,
+          0.3865783664459161
+        ],
+        "click_rate_by_position": [
+          0.3411092715231788,
+          0.1915618101545254,
+          0.13766004415011038,
+          0.1122130242825607,
+          0.09374172185430464
+        ],
+        "ctr_given_examine_by_position": [
+          0.3411092715231788,
+          0.3037125182650999,
+          0.2759963707982031,
+          0.26089020619218084,
+          0.24249086340794884
+        ],
+        "first_click_position_mean": 1.9040175802364117,
+        "first_click_defined_rate": 0.6228145695364239,
+        "position_weighted_gain_mean": 0.6153931065963408
+      },
+      "diversity_metrics": {
+        "duplicate_rate": 0.0,
+        "same_genre_repeat_rate": 0.2883896247240618,
+        "unique_genre_count_mean": 3.558051876379691,
+        "genre_entropy_mean": 1.6867840694665268,
+        "intra_list_diversity_mean": 0.8300766733678762,
+        "catalog_coverage": 1.0,
+        "genre_coverage": 1.0
+      },
+      "offline_bridge_metrics": {
+        "target_hit_at_5": 0.0016004415011037529,
+        "target_ndcg_at_5": 0.0007670676524758964,
+        "target_mrr_at_5": 0.0005012877115526123,
+        "genre_hit_at_5": 0.7924944812362031
+      },
+      "raw_counts": {
+        "episode_count": 18120,
+        "slate_count": 181200,
+        "first_slate_count": 18120,
+        "total_clicks": 158783.0,
+        "successful_slates": 112854,
+        "multi_click_slates": 38320,
+        "recommended_item_count": 3706,
+        "recommended_genre_count": 18
+      }
+    }
+  },
+  "policy_ranking": [
+    {
+      "policy_name": "random_unique",
+      "mean_slate_reward": 0.8762858719646799,
+      "mean_episode_return": 8.762858719646799,
+      "slate_success_rate": 0.6228145695364239,
+      "target_hit_at_5": 0.0016004415011037529,
+      "intra_list_diversity_mean": 0.8300766733678762
+    },
+    {
+      "policy_name": "sasrec_topk",
+      "mean_slate_reward": 0.7597075055187638,
+      "mean_episode_return": 7.597075055187638,
+      "slate_success_rate": 0.5485596026490066,
+      "target_hit_at_5": 0.14801324503311258,
+      "intra_list_diversity_mean": 0.6103725277252278
+    },
+    {
+      "policy_name": "slate_dqn",
+      "mean_slate_reward": 0.7596247240618101,
+      "mean_episode_return": 7.596247240618101,
+      "slate_success_rate": 0.5498454746136865,
+      "target_hit_at_5": 0.1195364238410596,
+      "intra_list_diversity_mean": 0.6454091589579471
+    },
+    {
+      "policy_name": "popularity_topk",
+      "mean_slate_reward": 0.7450551876379691,
+      "mean_episode_return": 7.4505518763796905,
+      "slate_success_rate": 0.557985651214128,
+      "target_hit_at_5": 0.007781456953642384,
+      "intra_list_diversity_mean": 0.7100000000027542
+    }
+  ]
+}

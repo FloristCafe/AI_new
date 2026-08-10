@@ -77,6 +77,15 @@ def parse_args() -> argparse.Namespace:
         help="Number of items generated for each slate.",
     )
     parser.add_argument(
+        "--candidate-pool-size",
+        type=int,
+        default=50,
+        help=(
+            "Size of the SASRec candidate pool used to truncate the Slate-DQN action space. "
+            "Set 0 to disable candidate truncation."
+        ),
+    )
+    parser.add_argument(
         "--total-episodes",
         type=int,
         default=1000,
@@ -295,11 +304,50 @@ def build_env(metadata: dict, args: argparse.Namespace) -> SlateRecSimEnv:
     )
 
 
+def build_candidate_pool_from_state(
+    model: SlateDQN,
+    state_input_ids: np.ndarray,
+    candidate_pool_size: int,
+    device: torch.device,
+) -> np.ndarray | None:
+    if candidate_pool_size <= 0:
+        return None
+    if candidate_pool_size < model.slate_size:
+        raise ValueError(
+            f"candidate_pool_size={candidate_pool_size} must be >= slate_size={model.slate_size}."
+        )
+
+    state_tensor = torch.from_numpy(state_input_ids).long().unsqueeze(0).to(device)
+    with torch.no_grad():
+        user_state = model.encode_user_state(state_tensor)
+        item_weights = model.user_encoder.item_embedding.weight[1:]
+        item_scores = (user_state @ item_weights.transpose(0, 1)).squeeze(0)
+
+        seen_item_ids = state_tensor.squeeze(0)
+        seen_item_ids = seen_item_ids[seen_item_ids > 0]
+        if seen_item_ids.numel() > 0:
+            item_scores[seen_item_ids.long() - 1] = float("-inf")
+
+        topk_size = min(candidate_pool_size, model.num_items)
+        candidate_item_ids = torch.topk(item_scores, k=topk_size, dim=0).indices + 1
+    return candidate_item_ids.cpu().numpy().astype(np.int64)
+
+
 def mask_selected_items_on_device(
     q_values: torch.Tensor,
     prefix_tensor: torch.Tensor,
+    candidate_pool_ids: np.ndarray | None = None,
 ) -> torch.Tensor:
     masked_q_values = q_values.clone()
+    if candidate_pool_ids is not None:
+        candidate_mask = torch.zeros_like(masked_q_values, dtype=torch.bool)
+        candidate_indices = torch.as_tensor(
+            candidate_pool_ids,
+            device=masked_q_values.device,
+            dtype=torch.long,
+        ) - 1
+        candidate_mask[candidate_indices] = True
+        masked_q_values[~candidate_mask] = float("-inf")
     selected_item_ids = prefix_tensor[prefix_tensor > 0]
     if selected_item_ids.numel() > 0:
         masked_q_values[selected_item_ids.long() - 1] = float("-inf")
@@ -312,9 +360,14 @@ def choose_action_from_q_values_on_device(
     epsilon: float,
     rng: np.random.Generator,
     num_items: int,
+    candidate_pool_ids: np.ndarray | None = None,
 ) -> int:
     del num_items
-    masked_q_values = mask_selected_items_on_device(q_values, prefix_tensor)
+    masked_q_values = mask_selected_items_on_device(
+        q_values=q_values,
+        prefix_tensor=prefix_tensor,
+        candidate_pool_ids=candidate_pool_ids,
+    )
     available_action_indices = torch.nonzero(
         torch.isfinite(masked_q_values),
         as_tuple=False,
@@ -336,6 +389,7 @@ def generate_slate(
     rng: np.random.Generator,
     device: torch.device,
     num_items: int,
+    candidate_pool_ids: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[dict[str, np.ndarray | int]]]:
     state_tensor = torch.from_numpy(state_input_ids).long().unsqueeze(0).to(device)
     prefix_ids = np.zeros(slate_size, dtype=np.int64)
@@ -354,6 +408,7 @@ def generate_slate(
                     epsilon=epsilon,
                     rng=rng,
                     num_items=num_items,
+                    candidate_pool_ids=candidate_pool_ids,
                 )
                 micro_transitions.append(
                     {
@@ -578,6 +633,12 @@ def main() -> None:
                 "user_id": user_id,
             },
         )
+        candidate_pool_ids = build_candidate_pool_from_state(
+            model=online_model,
+            state_input_ids=observation["input_ids"],
+            candidate_pool_size=args.candidate_pool_size,
+            device=device,
+        )
 
         episode_reward = 0.0
         slate_count = 0
@@ -599,6 +660,7 @@ def main() -> None:
                 rng=rng,
                 device=device,
                 num_items=int(metadata["kept_item_count"]),
+                candidate_pool_ids=candidate_pool_ids,
             )
             next_observation, reward, terminated, truncated, info = train_env.step(
                 slate_action
@@ -713,6 +775,7 @@ def main() -> None:
         "num_items": int(metadata["kept_item_count"]),
         "max_seq_len": int(metadata["max_seq_len"]),
         "slate_size": args.slate_size,
+        "candidate_pool_size": args.candidate_pool_size,
         "total_episodes": args.total_episodes,
         "max_slates_per_episode": args.max_slates_per_episode,
         "learning_rate": args.learning_rate,

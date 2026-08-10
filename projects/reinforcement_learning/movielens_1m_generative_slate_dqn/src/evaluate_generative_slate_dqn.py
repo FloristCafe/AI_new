@@ -100,6 +100,24 @@ def parse_args() -> argparse.Namespace:
         help="Number of items per slate.",
     )
     parser.add_argument(
+        "--candidate-pool-size",
+        type=int,
+        default=50,
+        help=(
+            "Size of the SASRec candidate pool used to truncate the Slate-DQN action space. "
+            "Set 0 to disable candidate truncation."
+        ),
+    )
+    parser.add_argument(
+        "--blend-lambda",
+        type=float,
+        default=0.0,
+        help=(
+            "Residual logit blending weight used only for slate_dqn inference: "
+            "Q_final = Q_slate_dqn + blend_lambda * logits_sasrec."
+        ),
+    )
+    parser.add_argument(
         "--mc-rollouts",
         type=int,
         default=0,
@@ -291,6 +309,21 @@ def compute_item_popularity(
     return ranked_items.astype(np.int64)
 
 
+def compute_sasrec_item_scores_batch(
+    model: SlateDQN,
+    state_input_ids_batch: np.ndarray,
+    device: torch.device,
+) -> torch.Tensor:
+    state_tensor = torch.from_numpy(state_input_ids_batch).long().to(device)
+    user_state = model.encode_user_state(state_tensor)
+    item_weights = model.user_encoder.item_embedding.weight[1:]
+    item_scores = user_state @ item_weights.transpose(0, 1)
+    history_rows, history_cols = torch.nonzero(state_tensor > 0, as_tuple=True)
+    if history_rows.numel() > 0:
+        item_scores[history_rows, state_tensor[history_rows, history_cols] - 1] = float("-inf")
+    return item_scores
+
+
 def generate_random_unique_slates(
     batch_size: int,
     slate_size: int,
@@ -322,13 +355,52 @@ def generate_sasrec_topk_slates(
     slate_size: int,
     device: torch.device,
 ) -> np.ndarray:
-    state_tensor = torch.from_numpy(state_input_ids_batch).long().to(device)
     with torch.no_grad():
-        user_state = model.encode_user_state(state_tensor)
-        item_weights = model.user_encoder.item_embedding.weight[1:]
-        item_scores = user_state @ item_weights.transpose(0, 1)
+        item_scores = compute_sasrec_item_scores_batch(
+            model=model,
+            state_input_ids_batch=state_input_ids_batch,
+            device=device,
+        )
         topk_indices = torch.topk(item_scores, k=slate_size, dim=1).indices + 1
     return topk_indices.cpu().numpy().astype(np.int64)
+
+
+def build_candidate_pool_batch(
+    model: SlateDQN,
+    state_input_ids_batch: np.ndarray,
+    candidate_pool_size: int,
+    device: torch.device,
+) -> np.ndarray | None:
+    if candidate_pool_size <= 0:
+        return None
+    if candidate_pool_size < model.slate_size:
+        raise ValueError(
+            f"candidate_pool_size={candidate_pool_size} must be >= slate_size={model.slate_size}."
+        )
+
+    with torch.no_grad():
+        item_scores = compute_sasrec_item_scores_batch(
+            model=model,
+            state_input_ids_batch=state_input_ids_batch,
+            device=device,
+        )
+        topk_size = min(candidate_pool_size, model.num_items)
+        topk_indices = torch.topk(item_scores, k=topk_size, dim=1).indices + 1
+    return topk_indices.cpu().numpy().astype(np.int64)
+
+
+def build_sasrec_logits_batch(
+    model: SlateDQN,
+    state_input_ids_batch: np.ndarray,
+    device: torch.device,
+) -> np.ndarray:
+    with torch.no_grad():
+        item_scores = compute_sasrec_item_scores_batch(
+            model=model,
+            state_input_ids_batch=state_input_ids_batch,
+            device=device,
+        )
+    return item_scores.cpu().numpy().astype(np.float32)
 
 
 def generate_slate_dqn_slates(
@@ -336,15 +408,31 @@ def generate_slate_dqn_slates(
     state_input_ids_batch: np.ndarray,
     slate_size: int,
     device: torch.device,
+    candidate_pool_batch: np.ndarray | None = None,
+    sasrec_logits_batch: np.ndarray | None = None,
+    blend_lambda: float = 0.0,
 ) -> np.ndarray:
     batch_size = state_input_ids_batch.shape[0]
     state_tensor = torch.from_numpy(state_input_ids_batch).long().to(device)
     prefix_tensor = torch.zeros((batch_size, slate_size), dtype=torch.long, device=device)
+    blended_logits_tensor = None
+    if sasrec_logits_batch is not None and blend_lambda != 0.0:
+        blended_logits_tensor = torch.from_numpy(sasrec_logits_batch).float().to(device)
 
     with torch.no_grad():
         for position_index in range(slate_size):
             q_values = model.get_q_values(state_tensor, prefix_tensor)
             masked_q_values = q_values.clone()
+            if candidate_pool_batch is not None:
+                candidate_indices = (
+                    torch.from_numpy(candidate_pool_batch)
+                    .long()
+                    .to(device)
+                    - 1
+                )
+                candidate_mask = torch.zeros_like(masked_q_values, dtype=torch.bool)
+                candidate_mask.scatter_(1, candidate_indices, True)
+                masked_q_values = masked_q_values.masked_fill(~candidate_mask, float("-inf"))
             for previous_position in range(position_index):
                 selected_actions = prefix_tensor[:, previous_position]
                 valid_rows = selected_actions.gt(0)
@@ -353,7 +441,12 @@ def generate_slate_dqn_slates(
                     column_indices = selected_actions[valid_rows] - 1
                     masked_q_values[row_indices, column_indices] = float("-inf")
 
-            next_actions = masked_q_values.argmax(dim=1) + 1
+            if blended_logits_tensor is not None:
+                blended_q_values = masked_q_values + blend_lambda * blended_logits_tensor
+            else:
+                blended_q_values = masked_q_values
+
+            next_actions = blended_q_values.argmax(dim=1) + 1
             prefix_tensor[:, position_index] = next_actions
 
     return prefix_tensor.cpu().numpy().astype(np.int64)
@@ -368,6 +461,9 @@ def generate_policy_slates(
     device: torch.device,
     policy_rng: np.random.Generator,
     popularity_ranking: np.ndarray | None = None,
+    candidate_pool_batch: np.ndarray | None = None,
+    sasrec_logits_batch: np.ndarray | None = None,
+    blend_lambda: float = 0.0,
 ) -> np.ndarray:
     batch_size = state_input_ids_batch.shape[0]
     if policy_name == "random_unique":
@@ -402,6 +498,9 @@ def generate_policy_slates(
             state_input_ids_batch=state_input_ids_batch,
             slate_size=slate_size,
             device=device,
+            candidate_pool_batch=candidate_pool_batch,
+            sasrec_logits_batch=sasrec_logits_batch,
+            blend_lambda=blend_lambda,
         )
     raise ValueError(f"Unsupported policy name: {policy_name}")
 
@@ -777,6 +876,8 @@ def evaluate_slate_policy(
     max_states: int = 0,
     max_slates_per_episode: int | None = None,
     popularity_ranking: np.ndarray | None = None,
+    candidate_pool_size: int = 50,
+    blend_lambda: float = 0.0,
 ) -> dict[str, object]:
     input_ids = sequence_pool["input_ids"].astype(np.int64)
     target_ids = sequence_pool.get("target_ids")
@@ -818,6 +919,23 @@ def evaluate_slate_policy(
             target_ids[chunk_indices].copy() if target_ids is not None else None
         )
         chunk_user_ids = user_ids[chunk_indices].copy() if user_ids is not None else None
+        candidate_pool_batch = None
+        sasrec_logits_batch = None
+        if policy_name == "slate_dqn":
+            if model is None:
+                raise ValueError("A model is required for slate_dqn evaluation.")
+            candidate_pool_batch = build_candidate_pool_batch(
+                model=model,
+                state_input_ids_batch=chunk_input_ids,
+                candidate_pool_size=candidate_pool_size,
+                device=device,
+            )
+            if blend_lambda != 0.0:
+                sasrec_logits_batch = build_sasrec_logits_batch(
+                    model=model,
+                    state_input_ids_batch=chunk_input_ids,
+                    device=device,
+                )
 
         envs = [clone_env(env) for _ in range(chunk_size)]
         current_observations: list[dict[str, np.ndarray]] = []
@@ -845,6 +963,12 @@ def evaluate_slate_policy(
             state_input_ids_batch = np.stack(
                 [current_observations[int(active_index)]["input_ids"] for active_index in active_indices]
             ).astype(np.int64)
+            active_candidate_pool_batch = None
+            active_sasrec_logits_batch = None
+            if candidate_pool_batch is not None:
+                active_candidate_pool_batch = candidate_pool_batch[active_indices]
+            if sasrec_logits_batch is not None:
+                active_sasrec_logits_batch = sasrec_logits_batch[active_indices]
             slates = generate_policy_slates(
                 policy_name=policy_name,
                 model=model,
@@ -854,6 +978,9 @@ def evaluate_slate_policy(
                 device=device,
                 policy_rng=policy_rng,
                 popularity_ranking=popularity_ranking,
+                candidate_pool_batch=active_candidate_pool_batch,
+                sasrec_logits_batch=active_sasrec_logits_batch,
+                blend_lambda=blend_lambda,
             )
 
             for local_index, active_index in enumerate(active_indices):
@@ -971,6 +1098,8 @@ def main() -> None:
             max_states=resolved_max_eval_users,
             max_slates_per_episode=resolved_max_slates_per_episode,
             popularity_ranking=popularity_ranking,
+            candidate_pool_size=args.candidate_pool_size,
+            blend_lambda=args.blend_lambda,
         )
 
     report = {
@@ -987,6 +1116,8 @@ def main() -> None:
             "num_items": int(metadata["kept_item_count"]),
             "max_seq_len": int(metadata["max_seq_len"]),
             "slate_size": args.slate_size,
+            "candidate_pool_size": args.candidate_pool_size,
+            "blend_lambda": args.blend_lambda,
             "mc_rollouts": resolved_mc_rollouts,
             "rollout_batch_size": args.rollout_batch_size,
             "max_eval_users": resolved_max_eval_users,
