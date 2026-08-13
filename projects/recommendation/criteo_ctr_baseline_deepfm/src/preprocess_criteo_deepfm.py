@@ -7,7 +7,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Preprocess Criteo sample for a DeepFM baseline."
     )
@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
         default=32,
         help="Number of non-missing quantile buckets for each dense feature.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def collect_feature_groups(df: pd.DataFrame) -> tuple[list[str], list[str]]:
@@ -239,9 +239,7 @@ def build_summary(
     }
 
 
-def main() -> None:
-    args = parse_args()
-
+def run_preprocess(args: argparse.Namespace) -> dict[str, str | int | float | bool]:
     input_path = Path(args.input)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -317,14 +315,31 @@ def main() -> None:
     with summary_path.open("w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
+    result = {
+        "train_path": str(train_path),
+        "valid_path": str(valid_path),
+        "feature_config_path": str(feature_config_path),
+        "sparse_mapping_path": str(sparse_mapping_path),
+        "summary_path": str(summary_path),
+        "train_rows": int(train_df.shape[0]),
+        "valid_rows": int(valid_df.shape[0]),
+        "deepfm_ready": True,
+    }
+    return result
+
+
+def main() -> None:
+    args = parse_args()
+    result = run_preprocess(args)
+
     print("DeepFM preprocess finished.")
-    print(f"Train saved to: {train_path}")
-    print(f"Valid saved to: {valid_path}")
-    print(f"Feature config saved to: {feature_config_path}")
-    print(f"Sparse mappings saved to: {sparse_mapping_path}")
-    print(f"Summary saved to: {summary_path}")
-    print(f"Train shape: {train_df.shape}")
-    print(f"Valid shape: {valid_df.shape}")
+    print(f"Train saved to: {result['train_path']}")
+    print(f"Valid saved to: {result['valid_path']}")
+    print(f"Feature config saved to: {result['feature_config_path']}")
+    print(f"Sparse mappings saved to: {result['sparse_mapping_path']}")
+    print(f"Summary saved to: {result['summary_path']}")
+    print(f"Train rows: {result['train_rows']}")
+    print(f"Valid rows: {result['valid_rows']}")
 
 
 if __name__ == "__main__":

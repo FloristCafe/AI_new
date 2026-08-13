@@ -1,0 +1,16 @@
+[project]
+name = "criteo-ctr-baseline-deepfm"
+version = "0.1.0"
+description = "Criteo CTR DeepFM baseline with ClearML, Kedro, Netron, and Streamlit hooks."
+requires-python = ">=3.10"
+
+[tool.kedro]
+package_name = "criteo_ctr_baseline_deepfm_kedro"
+project_name = "criteo_ctr_baseline_deepfm"
+kedro_init_version = "1.5.0"
+tools = ""
+example_pipeline = "False"
+source_dir = "src"
+
+[tool.kedro_telemetry]
+project_id = "ab322dc6512b44edaea8dc3168ac1293"

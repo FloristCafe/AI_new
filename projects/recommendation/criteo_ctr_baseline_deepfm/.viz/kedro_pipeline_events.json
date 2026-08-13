@@ -1,0 +1,73 @@
+[
+  {
+    "event": "before_pipeline_run",
+    "timestamp": "2026-08-13T05:48:56.792596+00:00"
+  },
+  {
+    "event": "after_node_run",
+    "node": "preprocess_criteo_deepfm",
+    "node_id": "d81b1286",
+    "duration": 0.2255624000026728,
+    "status": "success"
+  },
+  {
+    "event": "after_dataset_saved",
+    "dataset": "preprocess_outputs",
+    "node_id": "4b07f93e",
+    "status": "Available",
+    "size": 0
+  },
+  {
+    "event": "after_dataset_loaded",
+    "dataset": "preprocess_outputs",
+    "node_id": "4b07f93e",
+    "status": "Available",
+    "size": 0
+  },
+  {
+    "event": "after_node_run",
+    "node": "train_criteo_deepfm",
+    "node_id": "d85b2179",
+    "duration": 145.70665429999644,
+    "status": "success"
+  },
+  {
+    "event": "after_dataset_saved",
+    "dataset": "training_outputs",
+    "node_id": "931f004c",
+    "status": "Available",
+    "size": 0
+  },
+  {
+    "event": "after_dataset_loaded",
+    "dataset": "training_outputs",
+    "node_id": "931f004c",
+    "status": "Available",
+    "size": 0
+  },
+  {
+    "event": "after_dataset_loaded",
+    "dataset": "preprocess_outputs",
+    "node_id": "4b07f93e",
+    "status": "Available",
+    "size": 0
+  },
+  {
+    "event": "after_node_run",
+    "node": "export_deepfm_onnx",
+    "node_id": "4e1ba5c5",
+    "duration": 12.858208800003922,
+    "status": "success"
+  },
+  {
+    "event": "after_dataset_saved",
+    "dataset": "onnx_export_outputs",
+    "node_id": "18b0b8ea",
+    "status": "Available",
+    "size": 0
+  },
+  {
+    "event": "after_pipeline_run",
+    "timestamp": "2026-08-13T05:51:35.601590+00:00"
+  }
+]

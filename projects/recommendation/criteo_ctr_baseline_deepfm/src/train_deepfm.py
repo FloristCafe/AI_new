@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+from clearml import Task
 from sklearn.metrics import average_precision_score, log_loss, roc_auc_score
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
@@ -42,7 +43,7 @@ class CriteoDeepFMDataset(Dataset):
         )
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Train a minimal DeepFM baseline on preprocessed Criteo data."
     )
@@ -139,7 +140,24 @@ def parse_args() -> argparse.Namespace:
         choices=["roc_auc", "pr_auc", "log_loss"],
         help="Validation metric used to save the best checkpoint.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--clearml-project-name",
+        type=str,
+        default="recommendation",
+        help="ClearML project name. Set empty string to disable Task.init grouping.",
+    )
+    parser.add_argument(
+        "--clearml-task-name",
+        type=str,
+        default="criteo_ctr_baseline_deepfm",
+        help="ClearML task name.",
+    )
+    parser.add_argument(
+        "--disable-clearml",
+        action="store_true",
+        help="Disable ClearML tracking for this run.",
+    )
+    return parser.parse_args(argv)
 
 
 def set_seed(seed: int) -> None:
@@ -322,8 +340,53 @@ def run_one_batch_overfit(
     return history
 
 
-def main() -> None:
-    args = parse_args()
+def maybe_init_clearml(args: argparse.Namespace) -> Task | None:
+    if args.disable_clearml:
+        return None
+
+    task = Task.init(
+        project_name=args.clearml_project_name,
+        task_name=args.clearml_task_name,
+    )
+    task.connect(vars(args))
+    return task
+
+
+def maybe_report_epoch(
+    clearml_task: Task | None,
+    epoch: int,
+    avg_train_loss: float,
+    train_metrics: dict[str, float],
+    valid_metrics: dict[str, float],
+) -> None:
+    if clearml_task is None:
+        return
+
+    logger = clearml_task.get_logger()
+    logger.report_scalar("train", "bce_loss", iteration=epoch, value=float(avg_train_loss))
+    for metric_name, metric_value in train_metrics.items():
+        logger.report_scalar("train", metric_name, iteration=epoch, value=float(metric_value))
+    for metric_name, metric_value in valid_metrics.items():
+        logger.report_scalar("valid", metric_name, iteration=epoch, value=float(metric_value))
+
+
+def maybe_upload_artifacts(
+    clearml_task: Task | None,
+    metrics_path: Path,
+    model_path: Path,
+    best_model_path: Path,
+    valid_pred_path: Path,
+) -> None:
+    if clearml_task is None:
+        return
+
+    clearml_task.upload_artifact("metrics_json", artifact_object=str(metrics_path))
+    clearml_task.upload_artifact("deepfm_model_pt", artifact_object=str(model_path))
+    clearml_task.upload_artifact("deepfm_model_best_pt", artifact_object=str(best_model_path))
+    clearml_task.upload_artifact("valid_predictions_parquet", artifact_object=str(valid_pred_path))
+
+
+def run_training(args: argparse.Namespace) -> dict:
     set_seed(args.seed)
 
     train_path = Path(args.train_path)
@@ -383,6 +446,7 @@ def main() -> None:
         args.embedding_weight_decay,
     )
     loss_fn = nn.BCEWithLogitsLoss()
+    clearml_task = maybe_init_clearml(args)
 
     if args.one_batch_overfit:
         one_batch_history = run_one_batch_overfit(
@@ -417,7 +481,14 @@ def main() -> None:
             json.dump(debug_payload, f, ensure_ascii=False, indent=2)
         torch.save(model.state_dict(), output_dir / "deepfm_one_batch.pt")
         print(f"One-batch debug saved to: {debug_metrics_path}")
-        return
+        if clearml_task is not None:
+            clearml_task.upload_artifact(
+                "one_batch_debug_json", artifact_object=str(debug_metrics_path)
+            )
+            clearml_task.upload_artifact(
+                "deepfm_one_batch_pt", artifact_object=str(output_dir / "deepfm_one_batch.pt")
+            )
+        return debug_payload
 
     history: list[dict] = []
     best_metric_value: float | None = None
@@ -461,6 +532,13 @@ def main() -> None:
             "valid_metrics": valid_metrics,
         }
         history.append(epoch_record)
+        maybe_report_epoch(
+            clearml_task=clearml_task,
+            epoch=epoch,
+            avg_train_loss=avg_train_loss,
+            train_metrics=train_metrics,
+            valid_metrics=valid_metrics,
+        )
 
         current_metric = valid_metrics[args.save_best_by]
         if args.save_best_by == "log_loss":
@@ -518,12 +596,32 @@ def main() -> None:
         {"label": valid_labels, "prediction": valid_probs}
     )
     valid_predictions.to_parquet(valid_pred_path, index=False)
+    maybe_upload_artifacts(
+        clearml_task=clearml_task,
+        metrics_path=metrics_path,
+        model_path=model_path,
+        best_model_path=best_model_path,
+        valid_pred_path=valid_pred_path,
+    )
+
+    return {
+        "model_path": str(model_path),
+        "best_model_path": str(best_model_path),
+        "metrics_path": str(metrics_path),
+        "valid_pred_path": str(valid_pred_path),
+        "metrics": metrics,
+    }
+
+
+def main() -> None:
+    args = parse_args()
+    result = run_training(args)
 
     print("DeepFM training finished.")
-    print(f"Model saved to: {model_path}")
-    print(f"Best model saved to: {best_model_path}")
-    print(f"Metrics saved to: {metrics_path}")
-    print(f"Validation predictions saved to: {valid_pred_path}")
+    print(f"Model saved to: {result['model_path']}")
+    print(f"Best model saved to: {result['best_model_path']}")
+    print(f"Metrics saved to: {result['metrics_path']}")
+    print(f"Validation predictions saved to: {result['valid_pred_path']}")
 
 
 if __name__ == "__main__":
