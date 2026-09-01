@@ -1,13 +1,13 @@
 [
   {
     "event": "before_pipeline_run",
-    "timestamp": "2026-08-13T05:48:56.792596+00:00"
+    "timestamp": "2026-08-13T09:36:40.587991+00:00"
   },
   {
     "event": "after_node_run",
     "node": "preprocess_criteo_deepfm",
     "node_id": "d81b1286",
-    "duration": 0.2255624000026728,
+    "duration": 0.22302180000406224,
     "status": "success"
   },
   {
@@ -28,7 +28,7 @@
     "event": "after_node_run",
     "node": "train_criteo_deepfm",
     "node_id": "d85b2179",
-    "duration": 145.70665429999644,
+    "duration": 144.86931739999272,
     "status": "success"
   },
   {
@@ -56,7 +56,7 @@
     "event": "after_node_run",
     "node": "export_deepfm_onnx",
     "node_id": "4e1ba5c5",
-    "duration": 12.858208800003922,
+    "duration": 12.600999000002048,
     "status": "success"
   },
   {
@@ -68,6 +68,6 @@
   },
   {
     "event": "after_pipeline_run",
-    "timestamp": "2026-08-13T05:51:35.601590+00:00"
+    "timestamp": "2026-08-13T09:39:18.302626+00:00"
   }
 ]
